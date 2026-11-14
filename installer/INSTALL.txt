@@ -1,0 +1,99 @@
+DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.14.4
+================================================================
+
+Windows only. You need Drug Dealer Simulator on Steam, and you and the host
+must be Steam friends. Up to four can play together. Everybody must have the
+same mod version (v0.14.4); the mod refuses to connect different versions.
+
+
+INSTALL
+-------
+1. Close the game.
+2. Right-click the zip you downloaded > Properties. If there is an "Unblock"
+   box at the bottom, tick it and press OK.
+3. Right-click the zip > Extract All. Anywhere is fine (Desktop, Downloads).
+4. In the extracted folder, double-click Install.bat.
+   It finds the game, copies the mod into it and tells you the result.
+   If Windows shows "Windows protected your PC": More info > Run anyway.
+5. Start the game from Steam.
+
+CHECK: the main menu now has a MULTIPLAYER entry below SETTINGS. Open it:
+the line under NOT IN A LOBBY starts with "Mod v0.14.4".
+
+Updating from an older version: same steps. The installer replaces the old one.
+
+
+JOIN THE HOST
+-------------
+1. Start the game and stay in the MAIN MENU. Do not load a save.
+2. The host invites you through Steam. Accept the invite (Shift+Tab opens
+   the Steam overlay, or use the Steam friends window).
+3. In the main menu open MULTIPLAYER and click JOIN <HOST>'S WORLD.
+4. Wait. The host's world is sent to you and loaded; this can take up to a
+   minute, and the game looks frozen for part of it.
+5. The first time, a "WHO ARE YOU?" screen asks you to pick a character,
+   outfit, face and hair. Pick and press START.
+
+You start in the host's apartment with empty pockets, at level 1, with your
+own storyline from the beginning. Money in the bank, orders and clients are
+shared with the host.
+
+While friends are in the host's world the mod saves it every 5 minutes
+into a file of its own (not a save slot). If the host's game crashes: start
+the game, open MULTIPLAYER in the main menu and choose LOAD CO-OP AUTOSAVE,
+host again, and let the others join again. A guest keeps their story, level,
+cash and goods when they join the same host again.
+
+Your own save games are not touched. Nothing you do in the host's world is
+written to your save slots.
+
+
+KEYS
+----
+V     emote wheel (pick with the mouse)
+U     talk to Marco, who sells clothes at the white rack just right of
+      the entrance of Donald's furniture shop, and sit down at the card
+      table in the night club
+F7    leave the lobby
+F8    show lobby status
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+Install.bat says files are missing, or there is no MULTIPLAYER entry:
+   An antivirus program removed one of the mod's DLL files. Install.bat
+   names the file. Do step 2 of INSTALL (the Unblock box), extract again
+   and run Install.bat again. If it is removed again, open your antivirus,
+   find the file in its history or quarantine, choose Allow or Restore, and
+   run Install.bat again.
+   dwmapi.dll and UE4SS.dll are the unchanged files of UE4SS, the
+   open-source script loader the mod runs on (github.com/UE4SS-RE/RE-UE4SS).
+
+Install.bat cannot find the game:
+   It asks for the folder. In Steam: right-click the game > Manage > Browse
+   local files, copy the path from the window that opens, paste it.
+
+"... has mod version ..., you have ...":
+   You and the host have different versions. Both install the same zip.
+
+"The host did not answer" or the join never finishes:
+   Go back to the main menu and click JOIN again. The host must be in their
+   loaded game, not in their main menu.
+
+The game crashes or something looks broken:
+   Send the host this file from the game's folder:
+       DrugDealerSimulator\Binaries\Win64\ue4ss\Mods\DDSMultiplayer\ipc\mod.log
+   and say what you were doing when it happened.
+
+
+INSTALL BY HAND (instead of Install.bat)
+----------------------------------------
+Copy dwmapi.dll and the ue4ss folder from the extracted zip into
+   <Steam library>\steamapps\common\DrugDealerSimulator\DrugDealerSimulator\Binaries\Win64
+so that they sit next to DrugDealerSimulator-Win64-Shipping.exe.
+Steam launch options for the game must be empty.
+
+
+UNINSTALL
+---------
+Delete dwmapi.dll and the ue4ss folder from that Win64 folder.
