@@ -43,6 +43,14 @@ return {
     -- too. false = only in co-op (hosting a lobby or in a shared world).
     SoloExtras = true,
 
+    -- A woman's voice for the player's own sounds (jumping, landing, breathing, falling,
+    -- coughing, taking a drug, climbing). The game's recordings are a man's; for a
+    -- character who is a woman they are played this much higher (the climbing sounds by
+    -- their own number) and at this share of their loudness. 1 = unchanged.
+    FemaleVoicePitch = 1.2,
+    FemaleVoiceClimbPitch = 1.3,
+    FemaleVoiceVolume = 0.8,
+
     -- The card room in the night club's basement: blackjack for cash.
     Casino = true,
     -- true: the club lets everybody in at any hour, not only from 20:00 to 05:00.

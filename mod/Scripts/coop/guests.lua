@@ -300,7 +300,16 @@ function Guests.self()
     return Guests.world and Guests.world.self or nil
 end
 function Guests.ready() return World.role ~= "guest" or Guests.received end
+-- What other modules keep in that record (the wall quest's step, the Shady Comm picture)
+-- stays when the record is written anew as a whole (coop/look.lua does).
+Guests.kept = { "wq", "pic" }
 function Guests.setSelf(record)
+    local old = Guests.self()
+    if type(record) == "table" and type(old) == "table" then
+        for _, field in ipairs(Guests.kept) do
+            if record[field] == nil and old[field] ~= nil then record[field] = old[field] end
+        end
+    end
     if World.role == "guest" then
         if Guests.mine then Guests.mine.c = record end
         update({ c = record })
@@ -309,6 +318,14 @@ function Guests.setSelf(record)
     end
 end
 World.onPockets = function(pockets) return update({ p = pockets }) end
+
+-- Host (and single player): everybody who has played in this world as a guest, by player
+-- id: { name, at, c, no, ... }; and the level a record was last at.
+function Guests.players()
+    if World.role == "guest" then return {} end
+    return Guests.world and Guests.world.players or {}
+end
+Guests.levelOf = levelOf
 
 Core.every(2, function()
     if World.role ~= "guest" or not World.active or Guests.received then return end

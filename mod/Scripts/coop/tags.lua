@@ -302,6 +302,8 @@ local function withCanvas(player, rt, fn)
 end
 
 local function colour(c)
+    -- (a paint of its own, { r, g, b }: coop/wallquest.lua's wall paint)
+    if type(c) == "table" then return { R = c[1], G = c[2], B = c[3], A = 1 } end
     local p = PAINTS[c]
     return { R = p[2], G = p[3], B = p[4], A = 1 }
 end
@@ -664,6 +666,8 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
         local g = ctx:get()
         if not valid(g) then return end
         local l, r = g:K2_GetActorLocation(), g:K2_GetActorRotation()
+        -- (a spray that is not a wall marking: coop/wallquest.lua answers for it)
+        if Tags.claim and Tags.claim(l) then return end
         local m = markingAt(l.X, l.Y, l.Z, 4)
         if not m then return end
         Tags.stats.sprayed = Tags.stats.sprayed + 1
@@ -1336,6 +1340,73 @@ Tags.setMine = function(text, use)
     load()
     my.d, my.use = text, use
     saveMine()
+end
+
+-- For coop/wallquest.lua, which paints a wall of its own.
+-- The material that shows a player's tag (their drawing, or the symbol they chose); nil
+-- for a player without one, or where nothing can be painted.
+function Tags.materialOf(pid)
+    local tag = tagOf(pid or me())
+    if not tag then return nil end
+    if tag.d then
+        local slot = canPaint() and slotFor(pid or me()) or nil
+        if not slot then return nil end
+        if slot.text ~= tag.d then
+            slot.text = tag.d
+            startRender(slot, decode(tag.d) or {})
+        end
+        return slot.mid
+    end
+    return symbolMaterial(tonumber(tag.s) or 0)
+end
+-- For coop/shady.lua: a player's tag as a picture for a screen (a texture that can be put
+-- on an image): their drawing, or the symbol of the game's they chose, on a dark disc.
+-- nil for a player without a tag, or where nothing can be painted.
+local SYMBOL_TEX = { "/Game/Textures/Decals/WallSpraySymbols/wallSprayedSymbol-%02d.wallSprayedSymbol-%02d",
+    "/Game/Textures/Decals/WallSpraySymbols/wallSpraySymbol-%02d.wallSpraySymbol-%02d" }
+local DISC = { w = 500, c = { 0.035, 0.035, 0.045 }, p = { 256, 256 } }
+function Tags.pictureOf(pid)
+    pid = tostring(pid or me())
+    local tag = tagOf(pid)
+    if not tag or not canPaint() then return nil end
+    local symbol = (not tag.d) and (tonumber(tag.s) or 0) or nil
+    if symbol and (symbol < 1 or symbol > 12) then return nil end
+    local slot = slotFor("pic:" .. pid)
+    if not slot then return nil end
+    local key = tag.d or ("s" .. symbol)
+    if slot.text ~= key then
+        slot.text = key
+        if tag.d then
+            local strokes = { DISC }
+            for _, s in ipairs(decode(tag.d) or {}) do strokes[#strokes + 1] = s end
+            startRender(slot, strokes)
+        else
+            startRender(slot, {})
+            local _, player = world()
+            pcall(withCanvas, player, slot.rt, function(cv)
+                disc(cv, DISC.p[1], DISC.p[2], DISC.w, colour(DISC.c))
+                local tex = asset(string.format(SYMBOL_TEX[1], symbol, symbol)) or asset(string.format(SYMBOL_TEX[2], symbol, symbol))
+                if tex then
+                    cv:K2_DrawTexture(tex, { X = 86, Y = 86 }, { X = 340, Y = 340 }, { X = 0, Y = 0 }, { X = 1, Y = 1 }, { R = 1, G = 1, B = 1, A = 1 }, 2, 0, { X = 0.5, Y = 0.5 })
+                end
+            end)
+        end
+    end
+    return slot.rt
+end
+-- The number that changes when that player's tag does.
+function Tags.versionOf(pid) return version[tostring(pid or me())] or 0 end
+
+-- A material that shows the given strokes ({ { w, c, p = { x, y, ... } }, ... }, as in a
+-- tag), kept under `name`.
+function Tags.paintOf(name, strokes)
+    local slot = canPaint() and slotFor("#" .. tostring(name)) or nil
+    if not slot then return nil end
+    if slot.text ~= name then
+        slot.text = name
+        startRender(slot, strokes)
+    end
+    return slot.mid
 end
 
 return Tags

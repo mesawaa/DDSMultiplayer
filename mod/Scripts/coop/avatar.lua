@@ -280,9 +280,25 @@ local function splitBody(body)
 end
 Avatar.splitBody = splitBody
 
+-- A hair colour ("Hats_Hair/SK_ma_hair_01#MI_hair_02_blond", the same for a beard): one of
+-- the game's hair materials (CitizenNPC/CharacterParts/Materials/Eye_hair), which all use
+-- the same pictures, so that every one of them fits every hairstyle and both beards. It
+-- goes on the part's hair (or beard) slots only: a hairstyle with glasses keeps its glasses.
+local HAIR_MATERIALS = {}
+for _, n in ipairs({ "MI_hair", "MI_hairJay", "MI_hair_01_dark", "MI_hair_02_blond", "MI_hair_02_brown", "MI_hair_02_dark", "MI_ma_hair_03_amy",
+    "MI_ma_hair_03_asian", "MI_ma_hair_03_dark1", "MI_ma_hair_05_short", "MI_ma_hair_06_gel", "MI_fe_hair_01_dark", "MI_fe_hair_02_dark",
+    "MI_fe_hair_02_diana", "MI_fe_hair_02_grey", "MI_fe_hair_04", "hairSicarioWife", "MI_beard_rough", "MI_beard_psych" }) do
+    HAIR_MATERIALS[n] = true
+end
+Avatar.HAIR_MATERIALS = HAIR_MATERIALS
+
 local function applyColour(comp, colour)
     if not colour then return end
-    local m = asset(CLOTH .. colour .. "." .. colour)
+    local hair = HAIR_MATERIALS[colour] == true
+    -- (a glasses frame's colour, "SK_ma_glass_03#MI_glass_dark2": on the frame's slots only,
+    -- the lenses keep their glass)
+    local frame = colour:sub(1, 8) == "MI_glass"
+    local m = asset(CLOTH .. (hair and "Eye_hair/" or "") .. colour .. "." .. colour)
     if not m then
         log("Outfit colour %s is not available", colour)
         return
@@ -290,7 +306,12 @@ local function applyColour(comp, colour)
     for i = 0, comp:GetNumMaterials() - 1 do
         local cur = comp:GetMaterial(i)
         local n = valid(cur) and cur:GetFName():ToString() or ""
-        if not n:find("skin", 1, true) and not n:find("_body_", 1, true) and not n:find("vest", 1, true) and not n:find("apron", 1, true)
+        if hair then
+            local low = n:lower()
+            if low:find("hair", 1, true) or low:find("beard", 1, true) then comp:SetMaterial(i, m) end
+        elseif frame then
+            if n:sub(1, 8) == "MI_glass" then comp:SetMaterial(i, m) end
+        elseif not n:find("skin", 1, true) and not n:find("_body_", 1, true) and not n:find("vest", 1, true) and not n:find("apron", 1, true)
             and not n:find("hair", 1, true) and not n:find("eye", 1, true) then comp:SetMaterial(i, m) end
     end
 end
@@ -1154,6 +1175,24 @@ function Avatar.lightFromAbove(p, x, y, z, radius, intensity)
 end
 
 -- Changes how another player looks; their character is rebuilt on the next tick.
+-- A plain lamp that goes with a stand-in (taken down with it). Unlike lightFromAbove it
+-- lights whatever is near, the figure among it.
+function Avatar.lamp(p, x, y, z, radius, intensity)
+    if not p or not valid(p.body) then return nil end
+    local light = p.body:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.PointLight"), { X = x, Y = y, Z = z }, { Pitch = 0, Yaw = 0, Roll = 0 })
+    if not valid(light) then return nil end
+    local c = light.LightComponent
+    c:SetMobility(2)
+    -- (no highlights: so close, the sheen on hair and beard turned black to grey)
+    pcall(function() c.SpecularScale = 0 end)
+    c:SetIntensity(intensity or 4000)
+    c:SetAttenuationRadius(radius or 400)
+    c:SetLightColor({ R = 1, G = 0.95, B = 0.88, A = 1 }, true)
+    c:SetCastShadows(false)
+    p.actors[#p.actors + 1] = light
+    return light
+end
+
 function Avatar.setLook(id, look)
     Avatar.looks[id] = look
     drop(id)

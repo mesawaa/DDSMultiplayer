@@ -301,4 +301,40 @@ Core.every(2, function()
     end
 end)
 
+-- Amy Schrader (the gas station) stands behind her counter, and gets pushed off her spot
+-- (seen by the user 2026-11-17: she ended up in the folding chair beside her, 67 away, and
+-- the save kept her there). When she has been away from her spot for a few seconds and
+-- nobody is talking to her or standing on it, she is put back the way a new game has her.
+local AMY = "/Game/Skeletal/NPC/ShopOwners/Amy/npcAmy.npcAmy_C"
+local AMY_HOME = { X = 6060.86, Y = -7291.56, Z = 172.15 }
+local AMY_YAW = 40
+local amyAwaySince = nil
+Core.every(2, function()
+    local player = World.player()
+    if not player then return end
+    local p = player:K2_GetActorLocation()
+    if math.abs(p.X - AMY_HOME.X) > 3000 or math.abs(p.Y - AMY_HOME.Y) > 3000 then return end
+    local a = (Core.actors(AMY) or {})[1]
+    if not a or not Core.alive(a) then return end
+    local l = a:K2_GetActorLocation()
+    local away = math.sqrt((l.X - AMY_HOME.X) ^ 2 + (l.Y - AMY_HOME.Y) ^ 2)
+    local busy = false
+    pcall(function() busy = player.inDialogue == true or player.isTrading == true end)
+    -- (not onto a player who stands where she belongs)
+    local taken = (p.X - AMY_HOME.X) ^ 2 + (p.Y - AMY_HOME.Y) ^ 2 < 90 * 90 and math.abs(p.Z - AMY_HOME.Z) < 200
+    if away < 12 or busy or taken then
+        amyAwaySince = nil
+        return
+    end
+    amyAwaySince = amyAwaySince or os.clock()
+    if os.clock() - amyAwaySince < 3 then return end
+    amyAwaySince = nil
+    pcall(function()
+        a:K2_SetActorLocation(AMY_HOME, false, {}, true)
+        a:K2_SetActorRotation({ Pitch = 0, Yaw = AMY_YAW, Roll = 0 }, true)
+        pcall(function() a:GetController():SetControlRotation({ Pitch = 0, Yaw = AMY_YAW, Roll = 0 }) end)
+    end)
+    log("Npc: Amy was %.0f off her spot; back behind the counter", away)
+end)
+
 return Npc
