@@ -269,4 +269,36 @@ Core.every(LOOK_EVERY, function()
     end
 end)
 
+-- Diana Fisk (the deco shop) walks, and the armchair right behind her lets a nudge step her
+-- up onto its seat, where she stays. (The game's own doing; seen by the user 2026-11-16.)
+-- When she stands well above the spot she started on, she is put back there.
+local DIANA = "/Game/GUI/EquipmentShopping/shopOwnerDecorations.shopOwnerDecorations_C"
+local diana = { address = nil, home = nil, highSince = nil }
+Core.every(2, function()
+    local player = World.player()
+    if not player then return end
+    local p = player:K2_GetActorLocation()
+    if math.abs(p.X - 9948) > 3000 or math.abs(p.Y + 5692) > 3000 then return end
+    local d = (Core.actors(DIANA) or {})[1]
+    if not d then return end
+    local address = d:GetAddress()
+    local l = d:K2_GetActorLocation()
+    if diana.address ~= address or not diana.home or l.Z < diana.home.Z then
+        if diana.address ~= address then diana.highSince = nil end
+        diana.address, diana.home = address, { X = l.X, Y = l.Y, Z = l.Z }
+        -- (she is saved with the world: a save made while she stood on the chair starts her there)
+        if l.Z > 250 then diana.home = { X = 9948, Y = -5692, Z = 240 } else return end
+    end
+    if l.Z - diana.home.Z > 25 then
+        diana.highSince = diana.highSince or os.clock()
+        if os.clock() - diana.highSince > 3 then
+            pcall(function() d:K2_SetActorLocation(diana.home, false, {}, true) end)
+            diana.highSince = nil
+            vlog("Npc: Diana stood on the furniture; back on the floor")
+        end
+    else
+        diana.highSince = nil
+    end
+end)
+
 return Npc

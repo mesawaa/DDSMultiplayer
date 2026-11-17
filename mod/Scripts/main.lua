@@ -79,13 +79,33 @@ ui.init({
     world = {
         canJoin = function() return M.world ~= nil and M.world.canJoin() end,
         join = function() if M.world then M.world.requestJoin() end end,
-        -- the autosave that can be loaded from the main menu: its date, or nil
+        -- the newest autosave that can be loaded from the main menu: its date, or nil
         autosave = function()
             local info = M.world and not M.world.active and not M.world.joining and M.world.autosaveInfo() or nil
             return info and tostring(info.date or "saved") or nil
         end,
-        loadAutosave = function() if M.world then M.world.loadAutosave() end end,
+        -- the list of autosaves (coop/backups.lua): true when it has opened
+        openAutosaves = function(onClose) return M.backups ~= nil and M.backups.open(onClose) == true end,
         hostName = function() return Net.name(S.owner) end,
+        -- what the host's world keeps for this player (a guest at the main menu), as a line of text, or nil
+        character = function()
+            local guests = M.guests
+            if not guests or not M.world or not M.world.canJoin() then return nil end
+            if os.clock() - (guests.askedAt or -100) > 4 then
+                guests.askedAt = os.clock()
+                guests.ask()
+            end
+            local info = guests.info
+            if not info or info.host ~= S.owner or not info.has then return nil end
+            return string.format("Your character in this world: level %d%s.", info.level or 1, info.date and (", last played " .. info.date) or "")
+        end,
+        -- that character is given up: the next join starts over, with the "who are you" screen
+        startOver = function()
+            if M.guests and M.guests.startOver() then
+                M.guests.info = nil
+                if M.look and M.look.startOver then pcall(M.look.startOver) end
+            end
+        end,
         status = function()
             local W = M.world
             if not W or not Net.inLobby() then return nil end
@@ -176,7 +196,7 @@ end)
 
 M.Core, M.Net, M.ui, M.XP, M.host, M.leave, M.statusText = Core, Net, ui, XP, host, leave, statusText
 
-for _, name in ipairs({ "coop.repl", "coop.world", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.traits", "coop.thumbs", "coop.clerk", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags" }) do
+for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups" }) do
     local ok, mod = pcall(require, name)
     if ok then
         M[name:match("[^.]+$")] = mod

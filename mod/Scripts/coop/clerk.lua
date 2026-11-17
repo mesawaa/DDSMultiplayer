@@ -18,7 +18,7 @@ local GEN = (rawget(_G, "DDSMP_CLERK_GEN") or 0) + 1
 _G.DDSMP_CLERK_GEN = GEN
 local function live() return rawget(_G, "DDSMP_CLERK_GEN") == GEN end
 
-local Clerk = { NAME = "Marco" }
+local Clerk = { NAME = "Marco", TITLE = "MARCO'S" }
 
 -- The shop's floor is x -2110..-850, y -13130..-11970, its top at z 110. The door and the
 -- windows are in the wall at y -11970; Donald's desk is at the far end. The rack stands

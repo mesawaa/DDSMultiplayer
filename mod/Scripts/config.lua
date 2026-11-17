@@ -39,6 +39,10 @@ return {
     PoliceDogExposure = 500,
     PoliceDogLevel = 7,
 
+    -- The card room, the clothes shop and the wardrobe screen are there in single player
+    -- too. false = only in co-op (hosting a lobby or in a shared world).
+    SoloExtras = true,
+
     -- The card room in the night club's basement: blackjack for cash.
     Casino = true,
     -- true: the club lets everybody in at any hour, not only from 20:00 to 05:00.
@@ -58,6 +62,10 @@ return {
     -- the mod's own (never one of your save slots). The multiplayer panel of the main
     -- menu can load it after a crash. 0 = off.
     AutosaveMinutes = 5,
+    -- How many of those autosaves are kept (the oldest goes when a new one is written).
+    -- CO-OP AUTOSAVES in the main menu's multiplayer panel lists them: any of them can be
+    -- loaded, or copied into one of your save slots.
+    AutosaveKeep = 10,
 
     -- Other players receive (amount * SharedXpMultiplier) of every shared XP gain.
     -- 1.0 = everyone gets the full amount.
@@ -100,10 +108,6 @@ return {
     -- this to a number of minutes: a step somebody has already done in this world then
     -- completes for you after that long. 0 = never.
     StoryCatchUpMinutes = 0,
-
-    -- A guest joining a world starts with empty pockets (keys are kept). Set to true to
-    -- let guests keep a copy of the host's inventory instead.
-    GuestKeepsInventoryCopy = false,
 
     -- Write every XP and sync decision to the log (ipc/mod.log). Useful when reporting a
     -- problem; leave off for normal play.

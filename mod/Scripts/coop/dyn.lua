@@ -85,6 +85,33 @@ local function sendTo(messageType, data, except)
     end
 end
 
+-- What a player is about to put down at a work station (a package from the pockets, a jar
+-- from the flat's stock, equipment picked up to be moved) is shown by the game as a
+-- "gizmo": a real object of the same class that follows the player's aim until it is put
+-- down, when the game makes the lasting object and removes the gizmo. A gizmo is nothing
+-- of the world yet. Copied like any other new object it stood on the other players' desk
+-- as a package or a jar that was not there, and they could pick the package up: the
+-- drugs then existed twice, in their pockets and still in the pockets of the player who
+-- was only aiming. Equipment and furniture carry a flag; a package is known by being the
+-- one the local player's station holds as its gizmo.
+function Dyn.isGizmo(actor)
+    local gizmo = false
+    pcall(function() gizmo = actor.isGizmo == true end)
+    if gizmo then return true end
+    pcall(function() gizmo = actor.isGizmo_0 == true end)
+    if gizmo then return true end
+    pcall(function()
+        local station = World.player().curWorkStation
+        if not valid(station) then return end
+        local addr = actor:GetAddress()
+        for _, name in ipairs({ "drugPackageGizmo", "equipmentGizmo" }) do
+            local held = station[name]
+            if valid(held) and held:GetAddress() == addr then gizmo = true end
+        end
+    end)
+    return gizmo
+end
+
 ---------------------------------------------------------------- a model for everything
 
 -- A dropped thing that shows nothing cannot be found again, by whoever dropped it or by
@@ -183,6 +210,10 @@ end
 
 local function announce(actor, madeAt)
     if not eligible(actor) then return end
+    if Dyn.isGizmo(actor) then
+        Dyn.stats.gizmos = (Dyn.stats.gizmos or 0) + 1
+        return
+    end
     counter = counter + 1
     -- player, the moment this game was started, a running number: a game that is restarted
     -- does not hand out the numbers of its earlier run again

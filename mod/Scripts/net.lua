@@ -8,7 +8,7 @@ local json = require("json")
 
 local Net = {}
 
-local PROTOCOL = 21
+local PROTOCOL = 24
 local VERSION = "?"
 pcall(function() VERSION = require("core").VERSION end)
 

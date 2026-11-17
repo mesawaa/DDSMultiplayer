@@ -28,6 +28,11 @@ local World = {
     loadStartedAt = -1000, -- when this game last started loading a save
     savedFor = {},         -- host: when the world was saved for a player who is on the way in
     listeners = {},
+    -- set by coop/guests.lua (every player's character is kept with the host's world):
+    onLoaded = nil,        -- fn(path): the player's own game was loaded from this file
+    onSaved = nil,         -- fn(path): the player's own game has been saved to this file
+    onPockets = nil,       -- fn(pockets): what a guest carries has changed
+    companion = nil,       -- fn(path) -> the file that holds the characters of that save
 }
 
 local SLOT_CLASS = "/Game/SaveGame/saveGameSlot.saveGameSlot_C"
@@ -58,6 +63,16 @@ function World.shared()
     if not World.active or not Net.hasPeers() or not Core.player() then return false end
     if World.role == "host" then return next(World.inWorld) ~= nil end
     return true
+end
+
+-- True while the mod's own places are open (the card room, the clothes shop, the wardrobe
+-- screen): in a shared world, while hosting a lobby, and in single player as well unless
+-- SoloExtras is false in config.lua. Never while a join is loading.
+function World.extras()
+    if World.active then return true end
+    if World.joining then return false end
+    if Net.isHost() then return true end
+    return Core.config.SoloExtras ~= false and Core.player() ~= nil
 end
 
 -- The other players in the world (for a guest: the host and the other guests the host has
@@ -242,7 +257,8 @@ end)
 ---------------------------------------------------------------- guest side
 
 local pendingInfo = nil
-local emptyGuestInventory, restorePockets   -- defined further down
+local emptyGuestInventory   -- defined further down
+local pocketsReady = false  -- guest: the pockets are this player's own again (see World.restorePockets)
 
 local function otherVersion(v)
     World.joining = nil
@@ -421,6 +437,10 @@ pcall(RegisterHook, "/Script/RamaSaveSystem.RamaSaveLibrary:RamaSave_LoadFromFil
         World.foreign = false                    -- the player's own game replaces the world
     end
     log("Loading %s (%s)", name and name:match("[^/\\]+$") or "a game", World.foreign and "a received world: saving is redirected" or "the player's own")
+    if not World.foreign and not j and World.onLoaded then
+        local ok, e = pcall(World.onLoaded, name)
+        if not ok then log("Characters: %s", tostring(e)) end
+    end
     if World.clearRestore then World.clearRestore() end
     if World.active and not j then
         -- Loading a different game replaces the world; the shared one is over for us.
@@ -461,8 +481,8 @@ Core.every(1, function()
             World.joining = nil
             World.active, World.role = true, "guest"
             Repl.reset()
+            pocketsReady = false
             emptyGuestInventory()
-            restorePockets()
             Net.send("world_joined", { epoch = j.epoch }, World.host or Net.S.owner)
             Net.notify("You are in " .. Net.name(Net.S.owner) .. "'s world")
             fire("start", "guest")
@@ -477,7 +497,7 @@ end)
 -- starts with empty pockets, otherwise every join would duplicate the host's goods.
 emptyGuestInventory = function()
     local player = World.player()
-    if not player or Core.config.GuestKeepsInventoryCopy then return end
+    if not player then return end
     local ok, e = pcall(function()
         Repl.import(player, {
             pocketItems = "()", pocketItemQuantity = "()", pocketItemVendor = "()", pocketItemVendorPrice = "()",
@@ -517,20 +537,15 @@ emptyGuestInventory = function()
     if not ok then log("Could not empty the guest inventory: %s", tostring(e)) end
 end
 
--- What a guest carries is theirs, and the loaded world does not have it: it is written
--- down every few seconds (when it changed) and put back when the guest joins this host
--- again. Without that every disconnect would cost a guest their cash and goods.
+-- What a guest carries is theirs, and the loaded world does not have it: it is sent to the
+-- host every few seconds (when it changed), kept there with the world (coop/guests.lua) and
+-- put back when the guest joins that world again. Without that every disconnect would cost
+-- a guest their cash and goods.
 local POCKET_VARS = { "pocketItems", "pocketItemQuantity", "pocketItemVendor", "pocketItemVendorPrice",
     "backpackItems", "backpackItemQuantity", "backpackItemVendor", "backpackItemVendorPrice",
     "quickUseSlots", "quickUseIndex", "quickUseGuids", "quickUseData",
     "curBackpackSize", "curBackpackWeight", "hasDrugs", "hasIllegalItems" }
 local pocketsText = nil
-
-local function pocketsPath()
-    local base = os.getenv("LOCALAPPDATA")
-    local dir = base and (base:gsub("\\", "/") .. "/DrugDealerSimulator/Saved/SaveGames") or Core.MOD_DIR
-    return string.format("%s/ddsmp_pockets_%s%s.json", dir, tostring(World.host or "x"):gsub("[^%w]", ""), Core.instance and ("_" .. Core.instance) or "")
-end
 
 local function inventoryNames(player)
     local names = {}
@@ -609,34 +624,29 @@ end
 
 local function savePockets()
     local player = World.player()
-    if World.role ~= "guest" or not player or not World.host then return end
-    local ok, text = pcall(function()
+    if World.role ~= "guest" or not player or not World.host or not pocketsReady or not World.onPockets then return end
+    local ok, text, data = pcall(function()
         local names = inventoryNames(player)
         for _, v in ipairs(POCKET_VARS) do names[#names + 1] = v end
         local values = Repl.export(player, names)
         local raw = nil
         pcall(function() raw = Repl.export(player, { "backpackItemContents" }).backpackItemContents end)
-        return Net.json.encode({ v = 1, vars = values, contents = raw, gang = gangState() })
+        local d = { v = 1, vars = values, contents = raw, gang = gangState() }
+        return Net.json.encode(d), d
     end)
     if not ok or type(text) ~= "string" or text == pocketsText then return end
-    local f = io.open(pocketsPath(), "wb")
-    if not f then return end
-    f:write(text)
-    f:close()
-    pocketsText = text
+    if World.onPockets(data) then pocketsText = text end
 end
 
-restorePockets = function()
+-- Puts back what this guest carried in this world (`stored`: what the host kept, or nil
+-- for a player who is new to it). Until this has run nothing of the pockets is sent.
+function World.restorePockets(stored)
     pocketsText = nil
     local player = World.player()
-    if not player or Core.config.GuestKeepsInventoryCopy then return end
-    local f = io.open(pocketsPath(), "rb")
-    local text = f and f:read("a") or nil
-    if f then f:close() end
-    local stored = nil
-    if text then pcall(function() stored = Net.json.decode(text) end) end
+    if World.role ~= "guest" or not player then return end
+    pocketsReady = true
     pcall(restoreGang, type(stored) == "table" and stored.gang or nil)
-    if not text then return end
+    if type(stored) ~= "table" then return end
     local ok, e = pcall(function()
         local p = stored
         if type(p) ~= "table" or type(p.vars) ~= "table" then return end
@@ -667,7 +677,7 @@ restorePockets = function()
         Repl.import(player, out)
         if type(p.contents) == "string" then Repl.importRaw(player, "backpackItemContents", p.contents) end
         pcall(function() player:refreshBackpackData() end)
-        log("Guest gets back what they carried when they last left this host (%d item row(s))", #saved)
+        log("Guest gets back what they carried when they last left this world (%d item row(s))", #saved)
     end)
     if not ok then log("Could not put the guest's pockets back: %s", tostring(e)) end
 end
@@ -681,27 +691,105 @@ end)
 ---------------------------------------------------------------- the host's autosave
 
 -- The game only saves when the player does. A host that crashes would take everybody's
--- hours with it, so while guests are in the world it is saved every few minutes into a
--- file of the mod's own (never one of the player's slots), keeping the one before. The
--- main menu's multiplayer panel offers to load it.
+-- hours with it, so while guests are in the world it is saved every few minutes into files
+-- of the mod's own (never one of the player's slots). The last AutosaveKeep of them are
+-- kept, each under a name of its own with a line in an index file. The main menu's
+-- multiplayer panel lists them (coop/backups.lua): any of them can be loaded, or copied
+-- into one of the game's save slots.
 local function autosaveDir()
     local base = os.getenv("LOCALAPPDATA")
     -- the game's Saved folder itself: its SaveGames and Serialized folders are synchronised
-    -- by Steam Cloud, and this file is not one of the game's saves
+    -- by Steam Cloud, and these files are not the game's saves
     return base and (base:gsub("\\", "/") .. "/DrugDealerSimulator/Saved") or Core.MOD_DIR
 end
-local function autosaveName(kind) return string.format("%s/ddsmp_autosave%s%s.save", autosaveDir(), Core.instance and ("_" .. Core.instance) or "", kind or "") end
+local function autosaveSuffix() return Core.instance and ("_" .. Core.instance) or "" end
+-- kind: nil and "_prev" are the two files of versions before 0.15, "_new" the one being
+-- written, anything else a time stamp
+local function autosaveName(kind) return string.format("%s/ddsmp_autosave%s%s.save", autosaveDir(), autosaveSuffix(), kind or "") end
 local function autosaveMeta() return autosaveName():gsub("%.save$", ".json") end
+local function autosaveIndex() return string.format("%s/ddsmp_autosaves%s.json", autosaveDir(), autosaveSuffix()) end
 local autosaveBusy, autosaveAt = false, nil
 
-function World.autosaveInfo()
-    local f = io.open(autosaveMeta(), "rb")
+local function readJson(path)
+    local f = io.open(path, "rb")
     if not f then return nil end
     local text = f:read("a")
     f:close()
-    local ok, m = pcall(Net.json.decode, text)
-    if not ok or type(m) ~= "table" or Core.fileSize(autosaveName()) <= 0 then return nil end
-    return m
+    local ok, value = pcall(Net.json.decode, text)
+    return ok and type(value) == "table" and value or nil
+end
+
+local function writeJson(path, value)
+    local f = io.open(path .. ".tmp", "wb")
+    if not f then return false end
+    f:write(Net.json.encode(value))
+    f:close()
+    os.remove(path)
+    return os.rename(path .. ".tmp", path) ~= nil
+end
+
+local function companionOf(path)
+    local ok, c = pcall(function() return World.companion and World.companion(path) or nil end)
+    return ok and type(c) == "string" and c or nil
+end
+
+-- The index: { list = { meta, ... } }, each meta with `file` (the name without the folder).
+local function readIndex()
+    local index = readJson(autosaveIndex())
+    local list = {}
+    for _, m in ipairs(index and type(index.list) == "table" and index.list or {}) do
+        if type(m) == "table" and type(m.file) == "string" and not m.file:find("[/\\]") then list[#list + 1] = m end
+    end
+    return list
+end
+
+-- Every autosave there is, newest first: { path, meta, old }. `old` marks the files of
+-- versions before 0.15 (one file and the one before it, no index).
+function World.autosaves()
+    local out = {}
+    for _, m in ipairs(readIndex()) do
+        local path = autosaveDir() .. "/" .. m.file
+        if Core.fileSize(path) > 0 then out[#out + 1] = { path = path, meta = m } end
+    end
+    local single = Core.fileSize(autosaveName()) > 0 and (readJson(autosaveMeta()) or {}) or nil
+    if single then out[#out + 1] = { path = autosaveName(), meta = single, old = true } end
+    if Core.fileSize(autosaveName("_prev")) > 0 then
+        -- nothing was written down about the one before: it is from the same world, a few minutes earlier
+        local m = { difficulty = single and single.difficulty or nil, at = single and tonumber(single.at) and (tonumber(single.at) - 1) or nil }
+        out[#out + 1] = { path = autosaveName("_prev"), meta = m, old = true, before = true }
+    end
+    for i, e in ipairs(out) do e.order = i end
+    table.sort(out, function(a, b)
+        local ta, tb = tonumber(a.meta.at) or 0, tonumber(b.meta.at) or 0
+        if ta ~= tb then return ta > tb end
+        return a.order < b.order
+    end)
+    return out
+end
+
+-- The newest autosave's description (its `date` is shown in the menu), or nil when there is none.
+function World.autosaveInfo()
+    local newest = World.autosaves()[1]
+    if not newest then return nil end
+    if newest.meta.date == nil then newest.meta.date = "saved" end
+    return newest.meta
+end
+
+-- Removes the autosaves beyond the newest `keep`, the old-style files included.
+local function pruneAutosaves(keep)
+    local all = World.autosaves()
+    local kept = {}
+    for i, e in ipairs(all) do
+        if i > keep then
+            os.remove(e.path)
+            local c = companionOf(e.path)
+            if c then os.remove(c) end
+            if e.old and not e.before then os.remove(autosaveMeta()) end
+        elseif not e.old then
+            kept[#kept + 1] = e.meta
+        end
+    end
+    writeJson(autosaveIndex(), { v = 1, list = kept })
 end
 
 function World.autosave(reason)
@@ -717,6 +805,25 @@ function World.autosave(reason)
         log("Autosave failed: %s", tostring(e))
         return false
     end
+    -- what the world looked like when it was saved (read now: the file takes a moment)
+    local meta = { at = os.time(), date = os.date("%d %b %H:%M"), difficulty = 0, players = 1 }
+    pcall(function() meta.difficulty = Core.find("difficultyManager_C").curDifficulty end)
+    pcall(function()
+        local clock = Core.find("BP_WorldTimeAndConditions_C")
+        meta.day, meta.hour = clock:GetCurrentIntDay(), clock:GetCurrentIntHour()
+    end)
+    pcall(function() meta.level = Core.find("statisticsManager_C").playerLevel end)
+    pcall(function()
+        local computer = Core.find("mainComputer_C")
+        meta.bank, meta.crypto = math.floor(computer.playerBankMoney), computer.playerCryptoCount
+    end)
+    pcall(function() meta.gang = Core.find("gangManager_C").gangLevel end)
+    pcall(function()
+        local out = {}
+        player:countAllMoney(out)
+        meta.cash = out.allMoneyCount
+    end)
+    for _ in pairs(World.inWorld) do meta.players = meta.players + 1 end
     local lastSize, stable, waited = -1, 0, 0
     local function check()
         waited = waited + 1
@@ -724,18 +831,21 @@ function World.autosave(reason)
         if size > 0 and size == lastSize then stable = stable + 1 else stable = 0 end
         lastSize = size
         if stable >= 2 then
-            -- the one before is kept: a crash while writing must not cost both
-            os.remove(autosaveName("_prev"))
-            os.rename(autosaveName(), autosaveName("_prev"))
-            local moved = os.rename(fresh, autosaveName())
-            local meta = { at = os.time(), date = os.date("%d %b %H:%M"), difficulty = 0, players = 1 }
-            pcall(function() meta.difficulty = Core.find("difficultyManager_C").curDifficulty end)
-            pcall(function() meta.day = Core.find("BP_WorldTimeAndConditions_C"):GetCurrentIntDay() end)
-            for _ in pairs(World.inWorld) do meta.players = meta.players + 1 end
-            local f = io.open(autosaveMeta(), "wb")
-            if f then
-                f:write(Net.json.encode(meta))
-                f:close()
+            -- a name of its own: nothing that exists is renamed or written over
+            local stamp = os.date("%Y%m%d-%H%M%S", meta.at)
+            local final = autosaveName("_" .. stamp)
+            if Core.fileSize(final) > 0 then
+                stamp = stamp .. "-" .. tostring(math.floor(os.clock() * 1000) % 1000)
+                final = autosaveName("_" .. stamp)
+            end
+            local moved = os.rename(fresh, final)
+            if moved then
+                meta.file = final:match("[^/]+$")
+                local list = readIndex()
+                table.insert(list, 1, meta)
+                writeJson(autosaveIndex(), { v = 1, list = list })
+                if World.onSaved then pcall(World.onSaved, final) end
+                pruneAutosaves(math.max(1, math.floor(tonumber(Core.config.AutosaveKeep) or 10)))
             end
             autosaveBusy = false
             log("Autosave written (%d bytes, %s)%s", size, tostring(reason or "timer"), moved and "" or " - could not be put in place")
@@ -767,19 +877,102 @@ Core.every(10, function()
     if World.autosave() then autosaveAt = now + minutes * 60 end
 end)
 
--- Loads the autosave through the game's own Continue flow (from the main menu). It is the
--- player's own world: what they save afterwards goes to their slots as usual.
+-- Loads an autosave (the newest when none is given) through the game's own Continue flow,
+-- from the main menu. It is the player's own world: what they save afterwards goes to
+-- their slots as usual.
 local restoring = nil
 World.restoring = function() return restoring end
 World.clearRestore = function() restoring = nil end
-function World.loadAutosave()
+function World.loadAutosave(entry)
     local menu = menuWidget()
-    local meta = World.autosaveInfo()
-    if not menu or not meta or World.joining or World.active then return false end
-    restoring = { path = autosaveName(), difficulty = tonumber(meta.difficulty) or 0, at = os.time() }
-    log("Loading the co-op autosave of %s", tostring(meta.date))
+    entry = entry or World.autosaves()[1]
+    if not menu or not entry or World.joining or World.active or Core.fileSize(entry.path) <= 0 then return false end
+    restoring = { path = entry.path, difficulty = tonumber(entry.meta.difficulty) or 0, at = os.time() }
+    log("Loading the co-op autosave %s (%s)", entry.path:match("[^/]+$"), tostring(entry.meta.date or "no date"))
     menu.continueSlotID = 0
     menu[CONTINUE_EVENT](menu)
+    return true
+end
+
+-- The time of an autosave the way the game writes a save's date in its slot list.
+function World.autosaveDate(entry)
+    local at = tonumber(entry.meta.at)
+    if not at then return tostring(entry.meta.date or "") end
+    -- of the old-style file before the last one only this much is known
+    local t = os.date("*t", entry.before and at + 1 or at)
+    return string.format("%s%d.%d.%d %d:%02d", entry.before and "Before " or "", t.day, t.month, t.year, t.hour, t.min)
+end
+
+-- Copies an autosave into save slot `slot` (0 = the game's first slot) under `name`, and
+-- writes it into the game's list of slots the way the game's own save screen does: that
+-- list is a save-game object ("saveSlotsFull") of parallel arrays, one element per slot.
+-- `list` is that object when the caller has it already (the save screen's own, which may
+-- hold a slot the player has just added); otherwise it is read from the disk.
+-- Returns true, or false and what went wrong.
+function World.copyAutosaveToSlot(entry, slot, name, list)
+    slot = math.floor(tonumber(slot) or -1)
+    if not entry or slot < 0 or slot > 98 then return false, "no such slot" end
+    if World.scratch() or World.player() then return false, "only from the main menu" end
+    local src = io.open(entry.path, "rb")
+    local data = src and src:read("a") or nil
+    if src then src:close() end
+    if not data or #data == 0 then return false, "the autosave cannot be read" end
+    local statics = Core.statics()
+    if not valid(list) then
+        pcall(function() list = statics:LoadGameFromSlot("saveSlotsFull", 0) end)
+        if not valid(list) then list = statics:CreateSaveGameObject(StaticFindObject(SLOT_CLASS)) end
+    end
+    if not valid(list) then return false, "the list of save slots cannot be read" end
+    -- the file first: a list that names a slot without a file would be worse than a file nobody lists
+    local target = string.format("%s/Serialized/saveSlot-%d.save", autosaveDir(), slot)
+    local out = io.open(target .. ".ddsmp", "wb")
+    if not out then return false, "the save slot cannot be written" end
+    out:write(data)
+    out:close()
+    if Core.fileSize(target .. ".ddsmp") ~= #data then
+        os.remove(target .. ".ddsmp")
+        return false, "the save slot cannot be written"
+    end
+    os.remove(target)
+    if not os.rename(target .. ".ddsmp", target) then return false, "the save slot cannot be written" end
+    -- one element of every array; a list that is shorter than the slot number grows
+    local saved = "C:/"
+    pcall(function() saved = Core.system():GetProjectSavedDirectory():ToString() end)
+    local quoted = function(s) return '"' .. tostring(s):gsub('[\\"]', "\\%0") .. '"' end
+    local m = entry.meta
+    local fields = {
+        { "slotOccupied", "True", "False" },
+        { "fullFilePath", quoted(saved .. "Serialized/saveSlot-" .. slot .. ".save"), '""' },
+        { "saveCustomName", quoted(name), '""' },
+        { "saveDateTime", quoted(World.autosaveDate(entry)), '""' },
+        { "saveDifficulty", tostring(math.floor(tonumber(m.difficulty) or 0)), "1" },
+        -- the game puts these two into the loaded world when they are above zero; zero
+        -- leaves what the file itself holds
+        { "pitcoinWallet", string.format("%.6f", tonumber(m.crypto) or 0), "0.000000" },
+        { "gangLevel", tostring(math.floor(tonumber(m.gang) or 0)), "0" },
+    }
+    local names = {}
+    for i, f in ipairs(fields) do names[i] = f[1] end
+    local now = Repl.export(list, names)
+    local values = {}
+    for _, f in ipairs(fields) do
+        local e = Repl.splitArray(now[f[1]] or "()")
+        for i = #e + 1, slot do e[i] = f[3] end
+        e[slot + 1] = f[2]
+        values[f[1]] = Repl.joinArray(e)
+    end
+    if Repl.import(list, values) ~= #fields then return false, "the list of save slots could not be changed" end
+    -- "Continue" stays on the game it was on, unless that was nothing at all
+    pcall(function() if list.lastSavedGame < 0 then list.lastSavedGame = slot end end)
+    local okSave, written = pcall(function() return statics:SaveGameToSlot(list, "saveSlotsFull", 0) end)
+    if not okSave or written ~= true then return false, "the list of save slots could not be written" end
+    -- the guests' characters that belong to this save go with it
+    local from, to = companionOf(entry.path), companionOf(target)
+    if to then
+        os.remove(to)
+        if from and Core.fileSize(from) > 0 then copyFile(from, to) end
+    end
+    log("Autosave %s copied to save slot %d as \"%s\"", entry.path:match("[^/]+$"), slot + 1, tostring(name))
     return true
 end
 
@@ -791,7 +984,25 @@ local function scratch() return World.role == "guest" or World.foreign or World.
 World.scratch = scratch
 
 pcall(RegisterHook, "/Script/RamaSaveSystem.RamaSaveLibrary:RamaSave_SaveToFile", function(_, _, filename)
-    if not scratch() then return end
+    if not scratch() then
+        -- The player's own game goes to one of their save slots: the characters of everybody
+        -- who has played in this world are written beside it (coop/guests.lua). The save
+        -- made for a guest and the co-op autosave have names of their own; the autosave
+        -- says itself when it is complete.
+        local name = nil
+        pcall(function() name = filename:get():ToString() end)
+        if type(name) == "string" and name ~= "" and World.onSaved then
+            local lower = name:gsub("\\", "/"):lower()
+            local ipc = tostring(Net.ipcDir()):gsub("\\", "/"):lower()
+            if not lower:find(ipc, 1, true) and not lower:find("ddsmp_autosave", 1, true) then
+                Core.after(1.5, function()
+                    local ok, e = pcall(World.onSaved, name)
+                    if not ok then log("Characters: %s", tostring(e)) end
+                end)
+            end
+        end
+        return
+    end
     local ok, e = pcall(function() filename:set(Net.ipcDir() .. "/guest_scratch.save") end)
     log("Guest save redirected: %s %s", tostring(ok), tostring(e or ""))
 end, function() end)

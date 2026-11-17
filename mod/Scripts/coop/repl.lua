@@ -150,6 +150,13 @@ local function resolve(obj, name)
     return nil, var
 end
 
+-- The names of all variables of obj's class (saved or not).
+function Repl.propertyNames(obj)
+    local out = {}
+    for _, entry in pairs(propsOf(obj)) do out[#out + 1] = entry.name end
+    return out
+end
+
 -- Exports the named variables of obj. Returns name -> text; unsupported or unreadable
 -- variables are left out. Names are matched without regard to case, like the game's own
 -- save system does (its lists say "quantity" where the property is "Quantity").

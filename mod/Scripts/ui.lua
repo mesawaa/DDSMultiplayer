@@ -214,7 +214,12 @@ local function build(kind, menu)
     addRow(box, primary, 0, 0)
     local join, joinLabel = menuButton("JOIN WORLD", 18, true)
     addRow(box, join, 0, 0)
-    local restore, restoreLabel = menuButton("LOAD CO-OP AUTOSAVE", 18, true)
+    -- A guest's character is kept with the host's world: what there is, and starting over.
+    st.character = label("", body, 14, GREY)
+    addRow(box, st.character, 8, 0)
+    local over, overLabel = menuButton("START OVER WITH A NEW CHARACTER", 18, true)
+    addRow(box, over, 0, 0)
+    local restore, restoreLabel = menuButton("CO-OP AUTOSAVES", 18, true)
     addRow(box, restore, 0, 0)
     local leave, leaveLabel = menuButton("LEAVE LOBBY", 18, true)
     addRow(box, leave, 0, 0)
@@ -231,6 +236,7 @@ local function build(kind, menu)
     st.primary, st.primaryLabel = primary, primaryLabel
     st.join, st.joinLabel = join, joinLabel
     st.restore, st.restoreLabel = restore, restoreLabel
+    st.over, st.overLabel = over, overLabel
     st.leave = leave
 
     -- The stock entries do not change colour on hover, so the new entry does not either.
@@ -243,8 +249,26 @@ local function build(kind, menu)
         { widget = join, label = joinLabel, idle = RED, hover = RED_HOT, click = function()
             if C.world then C.world.join() end
         end },
+        { widget = over, label = overLabel, idle = SOFT, hover = WHITE, click = function()
+            -- asked twice: the first click only changes the button's words for a few seconds
+            if st.overAt and os.clock() - st.overAt < 6 then
+                st.overAt = nil
+                if C.world and C.world.startOver then C.world.startOver() end
+            else
+                st.overAt = os.clock()
+            end
+            st.signature = nil
+        end },
         { widget = restore, label = restoreLabel, idle = SOFT, hover = WHITE, click = function()
-            if C.world and C.world.loadAutosave then C.world.loadAutosave() end
+            -- The list of autosaves takes this panel's place; closing it brings the panel back.
+            local main = states.main
+            local opened = C.world and C.world.openAutosaves and C.world.openAutosaves(function()
+                if main and states.main == main and not main.failed then
+                    st = main
+                    pcall(UI.open)
+                end
+            end)
+            if opened then UI.close() end
         end },
     }
     for _, b in ipairs(st.buttons) do
@@ -273,8 +297,10 @@ local function refresh()
         st.autosave = C.world and C.world.autosave and C.world.autosave() or nil
     end
     local autosave = st == states.main and not canJoin and st.autosave or nil
+    local character = st == states.main and canJoin and C.world.character and C.world.character() or nil
+    local confirming = character ~= nil and st.overAt ~= nil and os.clock() - st.overAt < 6
     local signature = table.concat({ tostring(S.ready), tostring(S.lobby), tostring(hosting), tostring(notice),
-        tostring(worldText), tostring(canJoin), tostring(autosave), table.concat(names, "|") }, "#")
+        tostring(worldText), tostring(canJoin), tostring(autosave), tostring(character), tostring(confirming), table.concat(names, "|") }, "#")
     if signature == st.signature then return end
     st.signature = signature
 
@@ -300,8 +326,14 @@ local function refresh()
     if notice then st.detail:SetText(text(notice)) end
     st.join:SetVisibility(canJoin and VIS_VISIBLE or VIS_COLLAPSED)
     st.restore:SetVisibility(autosave and VIS_VISIBLE or VIS_COLLAPSED)
-    if autosave then st.restoreLabel:SetText(text("LOAD CO-OP AUTOSAVE  (" .. tostring(autosave):upper() .. ")")) end
+    if autosave then st.restoreLabel:SetText(text("CO-OP AUTOSAVES  (" .. tostring(autosave):upper() .. ")")) end
     if canJoin then st.joinLabel:SetText(text("JOIN " .. tostring(C.world.hostName()):upper() .. "'S WORLD")) end
+    st.character:SetVisibility(character and VIS_SELF_HIT_TEST_INVISIBLE or VIS_COLLAPSED)
+    st.over:SetVisibility(character and VIS_VISIBLE or VIS_COLLAPSED)
+    if character then
+        st.character:SetText(text(character))
+        st.overLabel:SetText(text(confirming and "DELETE THIS CHARACTER?  CLICK AGAIN" or "START OVER WITH A NEW CHARACTER"))
+    end
 
     st.playersTitle:SetVisibility(inLobby and VIS_SELF_HIT_TEST_INVISIBLE or VIS_COLLAPSED)
     st.players:SetVisibility(inLobby and VIS_SELF_HIT_TEST_INVISIBLE or VIS_COLLAPSED)

@@ -57,6 +57,7 @@ function Screen.open()
     local s = { widget = W, buttons = {}, byAddress = {}, open = true }
     local ownerAddress = player:GetAddress()
     local tree, root = W.WidgetTree, W.WidgetTree.RootWidget
+    s.canvas = root
     for k = 0, root:GetChildrenCount() - 1 do root:GetChildAt(k):SetVisibility(COLLAPSED) end
 
     function s.new(kind) return StaticConstructObject(StaticFindObject("/Script/UMG." .. kind), tree) end
@@ -185,6 +186,35 @@ function Screen.open()
         s.byAddress[b.address] = b
         return b
     end
+
+    -- An invisible button that fills whatever room it is given (a card, under its
+    -- picture and words): clicking anywhere on the card that is not one of the card's own
+    -- buttons presses it. `label` names it for tests (Screen.click("hit:" .. label)).
+    -- (The tab's button sits in a row on the tab's canvas: the row is stretched over the
+    -- canvas and the button over the row.)
+    function s.hit(label, onClick)
+        local b = s.button("", nil, onClick)
+        b.label = "hit:" .. tostring(label)
+        local w = b.widget
+        pcall(function() w.txtBtnName:SetVisibility(COLLAPSED) end)
+        pcall(function() w.btnShow:SetRenderOpacity(0) end)
+        pcall(function()
+            local slot = w.btnShow.Slot
+            slot:SetSize({ SizeRule = 1, Value = 1 })
+            slot:SetHorizontalAlignment(0)
+            slot:SetVerticalAlignment(0)
+            slot:SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 0 })
+        end)
+        pcall(function()
+            local rowSlot = w.btnShow:GetParent().Slot
+            rowSlot:SetAutoSize(false)
+            rowSlot:SetAnchors({ Minimum = { X = 0, Y = 0 }, Maximum = { X = 1, Y = 1 } })
+            rowSlot:SetAlignment({ X = 0, Y = 0 })
+            rowSlot:SetOffsets({ Left = 0, Top = 0, Right = 0, Bottom = 0 })
+        end)
+        return b
+    end
+
 
     -- Where a widget hangs: "screen" when it sits somewhere under this screen's canvas,
     -- otherwise the address of the outermost box it is in (nil when it is in none).

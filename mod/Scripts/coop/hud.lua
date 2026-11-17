@@ -136,10 +136,18 @@ local function build(hud)
         st.promptKey:SetFont(hud.txtActionBtn.Font)
         st.promptLabel:SetFont(hud.txtAction.Font)
     end)
-    row:AddChildToHorizontalBox(st.promptKey)
+    -- the same spacing as the game's own hint (its key and action have these paddings)
+    local keySlot = row:AddChildToHorizontalBox(st.promptKey)
+    keySlot:SetPadding({ Left = 10, Top = 7, Right = 5, Bottom = 6 })
     local gap = row:AddChildToHorizontalBox(st.promptLabel)
-    gap:SetPadding({ Left = 10, Top = 0, Right = 0, Bottom = 0 })
-    place(row, 0.5, 0.5, 0, 64)
+    gap:SetPadding({ Left = 5, Top = 6, Right = 10, Bottom = 6 })
+    st.promptSlot = place(row, 0.5, 0.5, 0, 64)
+    -- the game's hint: a row (key, action) in a panel centred just below the crosshair
+    pcall(function()
+        st.gameText = hud.txtAction
+        st.gameRow = hud.txtAction:GetParent()
+        st.gamePanel = st.gameRow:GetParent()
+    end)
     st.prompt = row
     st.prompt:SetVisibility(COLLAPSED)
     st.toast = label("", 17, WHITE)
@@ -230,23 +238,124 @@ end
 
 ---------------------------------------------------------------- prompt and notice
 
+-- The game's own hint, when it shows: its row's size and the panel's centre (units).
+local function gameHint()
+    local shown, w, h, y = false, 0, 0, 45
+    pcall(function()
+        shown = st.gamePanel:IsVisible() and st.gameRow:IsVisible() and st.gameText:IsVisible()
+            and st.gameText:GetText():ToString() ~= ""
+        local d = st.gameRow:GetDesiredSize()
+        w, h = d.X, d.Y
+        y = st.gamePanel.Slot:GetPosition().Y
+    end)
+    return shown and w > 0, w, h, y
+end
+
+-- An `under` prompt is a line of the game's own kind: it stands right below the game's
+-- hint for the same thing (the wardrobe's "change clothes"), key under key, or in the
+-- hint's place when the game shows none.
+local function placePrompt()
+    if not st or not st.promptText or not valid(st.prompt) then return end
+    local x, y, ax, ay = 0, 64, 0.5, 0.5
+    if st.promptUnder then
+        local shown, w, h, cy = gameHint()
+        if shown then
+            x, y, ax, ay = -w / 2, cy + h / 2, 0, 0
+        else
+            y = cy
+        end
+    end
+    local key = string.format("%.0f %.0f %.1f %.1f", x, y, ax, ay)
+    if key == st.promptPlace then return end
+    st.promptPlace = key
+    pcall(function()
+        st.promptSlot:SetAlignment({ X = ax, Y = ay })
+        st.promptSlot:SetPosition({ X = x, Y = y })
+    end)
+end
+
 -- key: what to press ("U"); action: what it does ("SIT DOWN"). nil hides the prompt.
-function Hud.prompt(key, action)
+-- under: a line below the game's own hint, written as the game writes its hints (the
+-- action as given, not in capitals).
+function Hud.prompt(key, action, under)
     if not Hud.ready() then return end
-    local str = key and (tostring(key) .. "|" .. tostring(action)) or nil
+    local str = key and (tostring(key) .. "|" .. tostring(action) .. (under and "|u" or "")) or nil
     if str == st.promptText then return end
     st.promptText = str
+    st.promptUnder = under == true
     if str then
         st.promptKey:SetText(text(tostring(key):upper()))
-        st.promptLabel:SetText(text(tostring(action or ""):upper()))
+        st.promptLabel:SetText(text(under and tostring(action or "") or tostring(action or ""):upper()))
+        placePrompt()
         st.prompt:SetVisibility(NO_HIT)
     else
         st.prompt:SetVisibility(COLLAPSED)
     end
 end
 
+-- The game's hint comes and goes as the player looks about.
+Core.onTick(function()
+    if st and st.promptUnder and st.promptText then placePrompt() end
+end)
+
+-- A short message, in the game's own list of them (on the left, with its red mark). While
+-- a screen of ours covers the game's HUD the same kind of line is put on that screen, in
+-- the same place. Our own line in the middle only when neither can be had.
+local QUICK_CLASS = "/Game/GUI/quickMessageWidget.quickMessageWidget_C"
+
+local function quickOnScreen(s, player, hud, str)
+    local ok = pcall(function()
+        if not (s.quickList and valid(s.quickList)) then
+            local list = s.new("VerticalBox")
+            local slot = s.canvas:AddChildToCanvas(list)
+            -- where the game's panel of these lines is (read off it; these are its values)
+            local a, o, al = { 0, 0.5, 0, 0.5 }, { 25, 250, 400, 250 }, { 0, 1 }
+            pcall(function()
+                local src = hud.quickMessageList:GetParent().Slot
+                local sa, so, sal = src:GetAnchors(), src:GetOffsets(), src:GetAlignment()
+                a = { sa.Minimum.X, sa.Minimum.Y, sa.Maximum.X, sa.Maximum.Y }
+                o = { so.Left, so.Top, so.Right, so.Bottom }
+                al = { sal.X, sal.Y }
+            end)
+            -- (a screen with a panel on the left has the lines just right of it)
+            if type(s.quickLeft) == "number" then a[1], a[3] = s.quickLeft, s.quickLeft end
+            slot:SetAnchors({ Minimum = { X = a[1], Y = a[2] }, Maximum = { X = a[3], Y = a[4] } })
+            slot:SetOffsets({ Left = o[1], Top = o[2], Right = o[3], Bottom = o[4] })
+            slot:SetAlignment({ X = al[1], Y = al[2] })
+            slot:SetAutoSize(false)
+            slot:SetZOrder(60)
+            list:SetVisibility(3)
+            s.quickList = list
+        end
+        local class = StaticFindObject(QUICK_CLASS)
+        if not valid(class) then
+            pcall(function() LoadAsset((QUICK_CLASS:gsub("_C$", ""))) end)
+            class = StaticFindObject(QUICK_CLASS)
+        end
+        local lib = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
+        local w = lib:Create(player, class, nil)
+        w:Setup(text(str))
+        s.quickList:AddChild(w)
+    end)
+    return ok
+end
+
 function Hud.toast(str, seconds)
     if not Hud.ready() then return end
+    local player = World.player()
+    local hud = player.HUD
+    local screen = package.loaded["coop.screen"]
+    local s = type(screen) == "table" and screen.current or nil
+    if s and s.canvas then
+        if quickOnScreen(s, player, hud, str) then return end
+    else
+        local shown = pcall(function()
+            local v = hud:GetVisibility()
+            if v == 1 or v == 2 then error("the HUD is put away") end
+            hud:displayQuickMessage(text(str))
+        end)
+        if shown then return end
+    end
     st.toast:SetText(text(str))
     st.toast:SetVisibility(NO_HIT)
     st.toastUntil = os.clock() + (seconds or 3)

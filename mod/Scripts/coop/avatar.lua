@@ -73,6 +73,8 @@ Avatar.tune = {
     callLoc = { X = 0, Y = 0, Z = 0 }, callRot = { Pitch = 0, Yaw = 0, Roll = 90 },
     standFraction = 0.37,      -- where in the walking-and-texting loop (0..1) a standing player is held: feet together
     walkSpeed = 160,           -- units per second the loop was made for
+    femaleJogFrom = 260,       -- a woman faster than this jogs (her blueprint has a walk only)
+    femaleJogSpeed = 380,      -- units per second the women's jog was made for
     lightForward = 40, lightUp = 45,
     -- A spot light only shows where it lands. This small light at the phone falls on the
     -- holder's own hands and chest, so a torch that is on can be seen from any side.
@@ -139,9 +141,117 @@ local SKIN_OF = {
     SK_ma_head_04_dark = "MI_ma_body_01_deep",
     SK_ma_head_05_asian = "MI_ma_skin_body_01_caucasian_yellow",
     SK_ma_head_05_basian = "MI_ma_skin_body_01_caucasian_yellow",
+    -- women's: every face has one (the outfits come with mismatched skins, one of them
+    -- partly see-through)
+    SK_fe_head_01 = "MI_fe_skin_body_caucasian_01",
+    SK_fe_head_01_dark = "MI_fe_skin_deep",
+    SK_fe_head_02_asian = "MI_fe_skin_body_caucasian_yellow",
+    SK_fe_head_02_b = "MI_fe_skin_body_caucasian_01",
+    SK_fe_head_03 = "MI_fe_skin_body_caucasian_brown",
+    SK_fe_head_05 = "MI_fe_skin_deep",
 }
 
+-- Women. The female meshes have a skeleton of their own with hardly any animations; every
+-- animation the mod plays is the men's. A female figure is driven by SK_fe_casual_02_d, a
+-- female outfit the game made on the male skeleton: it runs the men's animation blueprint
+-- and every other part (outfit, head, hair, hands, arms) follows its pose, keeping female
+-- proportions. With another outfit it is hidden but keeps animating.
+local FEMALE_DRIVER = "SK_fe_casual_02_d"
+-- ...but only for the men's animations a woman has no own of (emotes, the phone, a call).
+-- Otherwise a female figure is driven by the female base body (the women's skeleton) and
+-- the women's animation blueprint (standing, walking), the women's jog when running, and a
+-- frame of the women's standing fidget when it stands still: the men's skeleton gives the
+-- women a man's stance. Both skeletons have the same bone names, so every part follows
+-- either driver.
+local FEMALE_BASE = "Basebody/SK_fe_body_average"
+local FEMALE_ANIM_BP = "/Game/Animations/CitizenFemale01_AnimBP"
+local FEMALE_STAND = "/Game/Animations/CitizenFemale_MOB1_Stand_Relaxed_Fgt_v1_IPC.CitizenFemale_MOB1_Stand_Relaxed_Fgt_v1_IPC"
+local FEMALE_JOG = "/Game/Animations/CitizenFemale_MOB1_Jog_F_IPC.CitizenFemale_MOB1_Jog_F_IPC"
+-- outfits with rolled sleeves: the forearms are a part of their own
+local FEMALE_ARMS = { SK_fe_casual_02_b = true, SK_fe_casual_02_c = true, SK_fe_casual_02_d = true, SK_fe_clerk_01 = true, SK_fe_sport_02_a = true }
+local function isFemale(meshName) return tostring(meshName):sub(1, 6) == "SK_fe_" end
+-- outfits that are a whole person, face and hands and all (the jogging set): the chosen
+-- face and the hands are left off (the face would stick through at the hairline, the ears
+-- and the neck) and the outfit's own skin takes the chosen face's tone (OUTFIT_SKIN)
+local OWN_FACE = { SK_fe_sport_01 = true }
+
+-- Outfits whose bare skin is painted into the outfit itself (the jogging set's belly, arms
+-- and legs): the skin channel of its material ("A: Details 3 / Skin") takes the face's
+-- tone. Faces not listed keep the outfit's own (light) skin.
+-- (measured: the outfit's face brought to the colour of the same face in a default outfit,
+-- side by side in screenshots)
+local OUTFIT_SKIN = {
+    SK_fe_head_05 = { R = 0.532, G = 0.253, B = 0.138, A = 1 },
+    SK_fe_head_01_dark = { R = 0.93, G = 0.464, B = 0.229, A = 1 },
+    SK_fe_head_03 = { R = 1.499, G = 0.768, B = 0.49, A = 1 },
+    SK_fe_head_02_asian = { R = 1.102, G = 0.64, B = 0.432, A = 1 },
+    SK_fe_head_01 = { R = 1.239, G = 0.721, B = 0.489, A = 1 },
+    SK_fe_head_02_b = { R = 1.239, G = 0.721, B = 0.489, A = 1 },
+}
+local PAINTED_SKIN = { MI_fe_sport_01 = true }
+
+-- The women's animation blueprint is looked up by its path every time (within one Avatar.batch: once). The engine
+-- throws it away when no figure uses it any more (between two worlds), and a pointer kept from the world before
+-- still answers IsValid: giving that to a figure crashed the game on the next world's first woman (v0.16.0).
+local FEMALE_ANIM_CLASS = FEMALE_ANIM_BP .. "." .. FEMALE_ANIM_BP:match("[^/]+$") .. "_C"
+local function animClass(female)
+    if not female then return asset(ANIM_CLASS) end
+    if memo then
+        local hit = memo[FEMALE_ANIM_CLASS]
+        if hit ~= nil then return hit or nil end
+    end
+    local class = StaticFindObject(FEMALE_ANIM_CLASS)
+    if not valid(class) then
+        pcall(function() LoadAsset(FEMALE_ANIM_BP) end)
+        class = StaticFindObject(FEMALE_ANIM_CLASS)
+    end
+    if not valid(class) then class = nil end
+    if memo then memo[FEMALE_ANIM_CLASS] = class or false end
+    return class
+end
+
+-- A female figure's driver on the men's skeleton (`male`) or the women's. The driver is
+-- hidden; the parts are told to follow it again.
+local function setSkeleton(p, male)
+    if not p or not p.female then return end
+    local want = male and "m" or "f"
+    if p.skel == want then return end
+    local m = mesh(male and FEMALE_DRIVER or FEMALE_BASE)
+    if not m then return end
+    p.comp:SetSkeletalMesh(m, true)
+    p.comp:SetVisibility(false, false)
+    p.skel = want
+    for _, part in ipairs(p.followers or {}) do
+        pcall(function() part:SetMasterPoseComponent(p.comp, true) end)
+    end
+end
+Avatar.setSkeleton = setSkeleton
+
+-- Back to the figure's own animation blueprint (a woman's: on the women's skeleton).
+local function toBlueprint(p)
+    setSkeleton(p, false)
+    p.comp:SetAnimationMode(0)
+    local class = animClass(p.female and p.skel == "f")
+    if class then p.comp:K2_SetAnimInstanceClass(class) end
+end
+
 local function applySkin(p, head)
+    local tone = OUTFIT_SKIN[head or ""]
+    if tone then
+        for _, actor in ipairs(p.actors) do
+            pcall(function()
+                local c = actor.SkeletalMeshComponent
+                for i = 0, c:GetNumMaterials() - 1 do
+                    local m = c:GetMaterial(i)
+                    local n = valid(m) and m:GetFName():ToString() or ""
+                    if PAINTED_SKIN[n] then
+                        local d = c:CreateDynamicMaterialInstance(i, m, FName("None"))
+                        if valid(d) then d:SetVectorParameterValue(FName("A: Details 3 / Skin"), tone) end
+                    end
+                end
+            end)
+        end
+    end
     local name = SKIN_OF[head or ""]
     if not name then return end
     local skin = asset(SKIN .. name .. "." .. name)
@@ -155,9 +265,33 @@ local function applySkin(p, head)
             for i = 0, c:GetNumMaterials() - 1 do
                 local m = c:GetMaterial(i)
                 local n = valid(m) and m:GetFName():ToString() or ""
-                if n:find("skin_body", 1, true) or n:find("_body_01", 1, true) then c:SetMaterial(i, skin) end
+                if n:find("skin_body", 1, true) or n:find("_body_01", 1, true) or n:find("fe_skin", 1, true) then c:SetMaterial(i, skin) end
             end
         end)
+    end
+end
+
+-- A colour of an outfit: the body name "MESH#MATERIAL" puts the game's material MATERIAL
+-- (one of CitizenNPC/CharacterParts/Materials) on every slot of the mesh that is not skin.
+local CLOTH = "/Game/CitizenNPC/CharacterParts/Materials/"
+local function splitBody(body)
+    local meshName, colour = tostring(body):match("^([^#]+)#?(.*)$")
+    return meshName, colour ~= "" and colour or nil
+end
+Avatar.splitBody = splitBody
+
+local function applyColour(comp, colour)
+    if not colour then return end
+    local m = asset(CLOTH .. colour .. "." .. colour)
+    if not m then
+        log("Outfit colour %s is not available", colour)
+        return
+    end
+    for i = 0, comp:GetNumMaterials() - 1 do
+        local cur = comp:GetMaterial(i)
+        local n = valid(cur) and cur:GetFName():ToString() or ""
+        if not n:find("skin", 1, true) and not n:find("_body_", 1, true) and not n:find("vest", 1, true) and not n:find("apron", 1, true)
+            and not n:find("hair", 1, true) and not n:find("eye", 1, true) then comp:SetMaterial(i, m) end
     end
 end
 
@@ -168,18 +302,39 @@ local function build(look, pos, name)
     local world = player:GetWorld()
     local p = { actors = {}, x = pos.x, y = pos.y, z = pos.z, yaw = pos.yaw, tx = pos.x, ty = pos.y, tz = pos.z, tyaw = pos.yaw, speed = 0 }
     local ok, e = xpcall(function()
-        local bodyMesh = mesh(look.body)
+        local meshName, colour = splitBody(look.body)
+        local female = isFemale(meshName)
+        p.female, p.skel, p.followers = female, female and "f" or nil, {}
+        local bodyMesh = mesh(female and FEMALE_BASE or meshName)
         if not bodyMesh then error("body mesh not available") end
         local body = spawn(world, "/Script/Engine.SkeletalMeshActor", pos)
         p.actors[1] = body
         body:SetActorEnableCollision(false)
         local comp = body.SkeletalMeshComponent
         comp:SetSkeletalMesh(bodyMesh, true)
-        local anim = asset(ANIM_CLASS)
+        local anim = animClass(female)
         if anim then comp:K2_SetAnimInstanceClass(anim) end
         p.body, p.comp = body, comp
+        if female then
+            comp:SetVisibility(false, false)
+            pcall(function() comp.VisibilityBasedAnimTickOption = 0 end)     -- always tick pose and bones
+            local outfit = mesh(meshName)
+            if not outfit then error("outfit mesh not available") end
+            local part = spawn(world, "/Script/Engine.SkeletalMeshActor", pos)
+            p.actors[#p.actors + 1] = part
+            part:SetActorEnableCollision(false)
+            part.SkeletalMeshComponent:SetSkeletalMesh(outfit, true)
+            part.SkeletalMeshComponent:SetMasterPoseComponent(comp, false)
+            part:K2_AttachToActor(body, FName("None"), 2, 2, 2, false)
+            p.followers[#p.followers + 1] = part.SkeletalMeshComponent
+            pcall(applyColour, part.SkeletalMeshComponent, colour)
+        else
+            pcall(applyColour, comp, colour)
+        end
         for _, partName in ipairs(look.parts) do
-            local m = mesh(partName)
+            -- a part may come in another colour too ("Hats_Hair/SK_ma_hat_cap_01#MI_hat_cap_01_darkblue")
+            local partMesh, partColour = splitBody(partName)
+            local m = mesh(partMesh)
             if not m then log("Puppet part %s is not available", partName) end
             if m then
                 local part = spawn(world, "/Script/Engine.SkeletalMeshActor", pos)
@@ -188,9 +343,11 @@ local function build(look, pos, name)
                 part.SkeletalMeshComponent:SetSkeletalMesh(m, true)
                 part.SkeletalMeshComponent:SetMasterPoseComponent(comp, false)
                 part:K2_AttachToActor(body, FName("None"), 2, 2, 2, false)
+                p.followers[#p.followers + 1] = part.SkeletalMeshComponent
+                if partColour then pcall(applyColour, part.SkeletalMeshComponent, partColour) end
             end
         end
-        applySkin(p, look.parts[1])
+        applySkin(p, look.face or look.parts[1])
         if name then
             local label = spawn(world, "/Script/Engine.TextRenderActor", pos)
             p.actors[#p.actors + 1] = label
@@ -210,6 +367,9 @@ local function build(look, pos, name)
     return p
 end
 
+-- A hat that hides the hair under it (set by coop/look.lua).
+Avatar.hidesHair = function() return false end
+
 -- How each other player looks: peer id -> { body, head, hair, arms }. Unknown players wear
 -- the default.
 Avatar.looks = {}
@@ -217,9 +377,23 @@ Avatar.looks = {}
 -- Turns { body, head, hair, arms } into the body mesh and part list a puppet is built from.
 local function partsOf(l)
     if type(l) ~= "table" or type(l.body) ~= "string" then return LOOKS.player end
+    local meshName = splitBody(l.body)
+    if isFemale(meshName) then
+        local face = l.head or "SK_fe_head_01"
+        local parts = { face, "Basebody/SK_fe_hands_average" }
+        if OWN_FACE[meshName] then parts = {} end           -- (its own hands too)
+        if FEMALE_ARMS[meshName] then parts[#parts + 1] = "Basebody/SK_fe_arm_average" end
+        if l.hair and l.hair ~= "" and not Avatar.hidesHair(l.hat) then parts[#parts + 1] = l.hair end
+        if type(l.hat) == "string" and l.hat ~= "" then parts[#parts + 1] = l.hat end
+        if type(l.glasses) == "string" and l.glasses ~= "" then parts[#parts + 1] = l.glasses end
+        return { body = l.body, parts = parts, face = face }
+    end
     local parts = { l.head or "SK_ma_head_01", "Basebody/SK_ma_hands_average" }
     if l.arms then parts[#parts + 1] = "Basebody/SK_ma_arm" end
-    if l.hair and l.hair ~= "" then parts[#parts + 1] = l.hair end
+    if l.hair and l.hair ~= "" and not Avatar.hidesHair(l.hat) then parts[#parts + 1] = l.hair end
+    if type(l.hat) == "string" and l.hat ~= "" then parts[#parts + 1] = l.hat end
+    if type(l.glasses) == "string" and l.glasses ~= "" then parts[#parts + 1] = l.glasses end
+    if type(l.beard) == "string" and l.beard ~= "" then parts[#parts + 1] = l.beard end
     return { body = l.body, parts = parts }
 end
 
@@ -330,13 +504,12 @@ function Avatar.testPose(path, fraction)
     for _, set in pairs(Avatar.puppets) do
         local p = set.player
         if anim then
+            setSkeleton(p, true)
             p.comp:PlayAnimation(anim, false)
             p.comp:SetPlayRate(0)
             p.comp:SetPosition((fraction or 0) * anim:GetPlayLength(), false)
         else
-            p.comp:SetAnimationMode(0)
-            local class = asset(ANIM_CLASS)
-            if class then p.comp:K2_SetAnimInstanceClass(class) end
+            toBlueprint(p)
         end
     end
     return anim ~= nil
@@ -424,16 +597,16 @@ local function holdThings(p)
         elseif pose == "phone" then anim = asset(PHONE_ANIM)
         elseif emote then anim = asset(emote.anim) end
         if anim then
+            setSkeleton(p, true)
             p.comp:PlayAnimation(anim, true)
             p.comp:SetPlayRate(1)
             p.phoneAnim = true
+            p.jogging = false
             p.standing = false
             pcall(function() p.animLength = anim:GetPlayLength() end)
         elseif p.phoneAnim then
             p.phoneAnim = false
-            p.comp:SetAnimationMode(0)
-            local class = asset(ANIM_CLASS)
-            if class then p.comp:K2_SetAnimInstanceClass(class) end
+            toBlueprint(p)
         end
         p.pose = pose
         if holdsPhone then seatPhone(p, pose) end
@@ -536,7 +709,27 @@ local function move(p, dt, camera)
             { Pitch = 0, Yaw = p.yaw + MESH_YAW, Roll = 0 }, false, {}, true)
     end
     local now = p.ticks % 10 == 0
-    if not p.phoneAnim and (p.walk ~= p.speed or now) then
+    if p.female and not p.phoneAnim then
+        local run = (p.speed or 0) > Avatar.tune.femaleJogFrom
+        if run ~= (p.jogging == true) then
+            p.jogging = run
+            if run then
+                local jog = asset(FEMALE_JOG)
+                if jog then
+                    p.comp:PlayAnimation(jog, true)
+                else
+                    p.jogging = false
+                end
+            else
+                toBlueprint(p)
+                p.walk = nil
+            end
+        end
+        if p.jogging then
+            p.comp:SetPlayRate(math.max(0.6, math.min(1.8, (p.speed or 0) / Avatar.tune.femaleJogSpeed)))
+        end
+    end
+    if not p.phoneAnim and not p.jogging and (p.walk ~= p.speed or now) then
         p.walk = p.speed
         pcall(function()
             local anim = p.comp:GetAnimInstance()
@@ -776,14 +969,120 @@ Core.onTick(function(dt)
     if mark then Core.mark("avatar: move figures", os.clock() - mark) end
 end)
 
+-- Standing about: the citizens' calm standing loop, and only now and then (every 45 to 65
+-- seconds) their fidget, which looks over the shoulder. (The citizens' own animation
+-- plays the fidget on every loop.) Both start and end in the same pose, so the fidget
+-- starts when the loop comes round and the loop again when the fidget is over.
+local IDLE_ANIM = "/Game/Animations/Citizen_MOB1_Stand_Relaxed_Idle_v2_IPC.Citizen_MOB1_Stand_Relaxed_Idle_v2_IPC"
+local FIDGET_ANIM = "/Game/Animations/Citizen_MOB1_Stand_Relaxed_Fgt_v1_IPC.Citizen_MOB1_Stand_Relaxed_Fgt_v1_IPC"
+local idlers = {}
+
+local function femaleStill(p)
+    local stand = asset(FEMALE_STAND)
+    if not stand then return false end
+    setSkeleton(p, false)
+    p.comp:PlayAnimation(stand, false)
+    p.comp:SetPlayRate(0)
+    p.comp:SetPosition(0, false)
+    return true
+end
+
+-- A woman standing about: the women's only standing clip is their fidget; its last second
+-- (where it also ends) keeps the head within a few degrees of straight ahead, so she sways
+-- back and forth in that second, slowly, and (not `calm`) does the whole fidget now and then.
+local SWAY_FROM, SWAY_TO, SWAY_RATE = 4.0, 4.95, 0.45
+
+local function startIdle(p, calm)
+    if p.female then
+        if not femaleStill(p) then return false end
+        p.comp:SetPosition(SWAY_TO, false)
+        p.comp:SetPlayRate(-SWAY_RATE)
+        p.idleCycle = { female = true, calm = calm == true, at = os.clock() + math.random(45, 65), fidget = false }
+        idlers[p] = true
+        return true
+    end
+    local idle = asset(IDLE_ANIM)
+    if not idle then return false end
+    p.comp:PlayAnimation(idle, true)
+    p.comp:SetPlayRate(1)
+    -- (calm: the standing loop only, never the fidget)
+    if calm then return true end
+    p.idleCycle = { loops = math.random(7, 10), last = 0, fidget = false }
+    idlers[p] = true
+    return true
+end
+
+Core.onTick(function()
+    for p in pairs(idlers) do
+        local c = p.idleCycle
+        if not c or not valid(p.comp) then
+            idlers[p] = nil
+        else
+            pcall(function()
+                if c.female then
+                    -- (a woman: swaying, the whole fidget now and then, swaying again)
+                    if c.fidget then
+                        if not p.comp:IsPlaying() or p.comp:GetPosition() >= SWAY_TO then
+                            c.fidget = false
+                            c.at = os.clock() + math.random(45, 65)
+                            p.comp:PlayAnimation(asset(FEMALE_STAND), false)
+                            p.comp:SetPosition(SWAY_TO, false)
+                            p.comp:SetPlayRate(-SWAY_RATE)
+                        end
+                        return
+                    end
+                    if not c.calm and os.clock() >= c.at then
+                        p.comp:SetPosition(0, false)
+                        p.comp:SetPlayRate(1)
+                        c.fidget = true
+                        return
+                    end
+                    local at = p.comp:GetPosition()
+                    if at >= SWAY_TO then
+                        p.comp:SetPosition(SWAY_TO, false)
+                        p.comp:SetPlayRate(-SWAY_RATE)
+                    elseif at <= SWAY_FROM then
+                        p.comp:SetPosition(SWAY_FROM, false)
+                        p.comp:SetPlayRate(SWAY_RATE)
+                    end
+                    if not p.comp:IsPlaying() then p.comp:Play(false) end
+                    return
+                end
+                if c.fidget then
+                    if not p.comp:IsPlaying() then startIdle(p) end
+                    return
+                end
+                local at = p.comp:GetPosition()
+                if at + 0.05 < c.last then
+                    -- the loop came round
+                    c.loops = c.loops - 1
+                    if c.loops <= 0 then
+                        local fidget = asset(FIDGET_ANIM)
+                        if fidget then
+                            p.comp:PlayAnimation(fidget, false)
+                            p.comp:SetPlayRate(1)
+                            c.fidget = true
+                        else
+                            c.loops = 10
+                        end
+                    end
+                end
+                c.last = at
+            end)
+        end
+    end
+end)
+
 -- A puppet that is not a player: the wardrobe shows one as a mirror. It stands still.
--- `pose` "idle" leaves it to the citizens' idle animation (it looks around); otherwise it
--- holds one relaxed standing frame.
+-- `pose` "idle" has it stand about (see startIdle), "calm" the same without the fidget;
+-- otherwise it holds one relaxed standing frame.
 function Avatar.buildStandIn(look, x, y, z, yaw, name, pose)
     local p = build(partsOf(look), { x = x, y = y, z = z, yaw = yaw }, name)
     if p then
         pcall(function()
-            local anim = pose ~= "idle" and asset(STAND_ANIM) or nil
+            if (pose == "idle" or pose == "calm") and startIdle(p, pose == "calm") then return end
+            if p.female and femaleStill(p) then return end
+            local anim = asset(STAND_ANIM)
             if anim then
                 p.comp:PlayAnimation(anim, false)
                 p.comp:SetPlayRate(0)
@@ -802,13 +1101,15 @@ end
 function Avatar.poseStandIn(p, path)
     if not p or not valid(p.comp) then return end
     local anim = path and asset(path) or nil
+    p.idleCycle = nil
     if anim then
+        setSkeleton(p, true)
         p.comp:PlayAnimation(anim, true)
         p.comp:SetPlayRate(1)
+    elseif startIdle(p) then
+        return
     else
-        p.comp:SetAnimationMode(0)
-        local class = asset(ANIM_CLASS)
-        if class then p.comp:K2_SetAnimInstanceClass(class) end
+        toBlueprint(p)
     end
 end
 
@@ -818,6 +1119,39 @@ function Avatar.moveStandIn(p, x, y, z, yaw)
 end
 
 function Avatar.destroyStandIn(p) destroy(p) end
+-- (for test scripts) one step of another player's figure
+function Avatar.stepPuppet(p, dt, camera) move(p, dt, camera) end
+
+-- Lights a stand-in from a light of its own that reaches nothing else: the figure's parts
+-- are also on lighting channel 2, the light on that channel alone. The light is one of
+-- the figure's actors (it goes with it).
+local function channels(c, a, b, z)
+    local ok = pcall(function() c:SetLightingChannels(a, b, z) end)
+    if not ok then
+        pcall(function()
+            c.LightingChannels = { bChannel0 = a, bChannel1 = b, bChannel2 = z }
+            c:MarkRenderStateDirty()
+        end)
+    end
+end
+function Avatar.lightFromAbove(p, x, y, z, radius, intensity)
+    if not p or not valid(p.body) then return nil end
+    for _, a in ipairs(p.actors or {}) do
+        pcall(function() if valid(a.SkeletalMeshComponent) then channels(a.SkeletalMeshComponent, true, false, true) end end)
+    end
+    local world = p.body:GetWorld()
+    local light = world:SpawnActor(StaticFindObject("/Script/Engine.PointLight"), { X = x, Y = y, Z = z }, { Pitch = 0, Yaw = 0, Roll = 0 })
+    if not valid(light) then return nil end
+    local c = light.LightComponent
+    c:SetMobility(2)
+    c:SetIntensity(intensity or 5000)
+    c:SetAttenuationRadius(radius or 400)
+    c:SetLightColor({ R = 1, G = 0.95, B = 0.88, A = 1 }, true)
+    c:SetCastShadows(false)
+    channels(c, false, false, true)
+    p.actors[#p.actors + 1] = light
+    return light
+end
 
 -- Changes how another player looks; their character is rebuilt on the next tick.
 function Avatar.setLook(id, look)

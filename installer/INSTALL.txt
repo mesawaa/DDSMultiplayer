@@ -1,9 +1,9 @@
-DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.14.4
+DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.16.1
 ================================================================
 
 Windows only. You need Drug Dealer Simulator on Steam, and you and the host
 must be Steam friends. Up to four can play together. Everybody must have the
-same mod version (v0.14.4); the mod refuses to connect different versions.
+same mod version (v0.16.1); the mod refuses to connect different versions.
 
 
 INSTALL
@@ -18,7 +18,7 @@ INSTALL
 5. Start the game from Steam.
 
 CHECK: the main menu now has a MULTIPLAYER entry below SETTINGS. Open it:
-the line under NOT IN A LOBBY starts with "Mod v0.14.4".
+the line under NOT IN A LOBBY starts with "Mod v0.16.1".
 
 Updating from an older version: same steps. The installer replaces the old one.
 
@@ -39,10 +39,22 @@ own storyline from the beginning. Money in the bank, orders and clients are
 shared with the host.
 
 While friends are in the host's world the mod saves it every 5 minutes
-into a file of its own (not a save slot). If the host's game crashes: start
-the game, open MULTIPLAYER in the main menu and choose LOAD CO-OP AUTOSAVE,
-host again, and let the others join again. A guest keeps their story, level,
-cash and goods when they join the same host again.
+into files of its own (not save slots) and keeps the last ten. If the host's
+game crashes, or you want to go back: start the game, open MULTIPLAYER in
+the main menu and choose CO-OP AUTOSAVES. Click one to LOAD it, or COPY it
+into one of your save slots. Then host again and let the others join again.
+
+Everybody's character (story, level, cash and goods) is kept with the host's
+world: it is saved with every save and autosave of the host and comes back
+when that save is loaded. A guest who joins the same world again continues
+where they were in it. A new game of the host is a new start for everybody.
+
+A guest who wants a new character in the host's world: in the main menu,
+open MULTIPLAYER while in the host's lobby and click START OVER WITH A NEW
+CHARACTER (twice), then join.
+
+Sector B opens for everybody as soon as one player has opened it (level 10,
+standing in a hideout).
 
 Your own save games are not touched. Nothing you do in the host's world is
 written to your save slots.

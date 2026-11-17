@@ -552,6 +552,20 @@ Net.on("pd", function(sender, data)
 end)
 
 -- "pa": the sender starts or stops driving one of our officers.
+-- A copied officer that is not (or no longer) driven here gives up what it had started
+-- and goes back to following its original.
+-- The other half of its patrol goes with it unless that one is driven here itself: a
+-- partner copies the lead's "suspect" state in its own tick, and would keep it.
+local function standDown(c)
+    for _, r in ipairs({ c, c.pair and Pop.copies[c.pair] or false }) do
+        if r and (r == c or not r.engaged) and Core.alive(r.npc) then
+            pcall(function() r.npc:EndChase(false, false) end)
+            stopThinking(r.npc)
+            r.idleSince = nil
+        end
+    end
+end
+
 Net.on("pa", function(sender, data)
     if not trusted(sender) then return end
     if data.deny then
@@ -561,11 +575,18 @@ Net.on("pa", function(sender, data)
         if c then
             c.engaged, c.calmSince = false, nil
             c.denyUntil = os.clock() + 15
-            if Core.alive(c.npc) then
-                pcall(function() c.npc:EndChase(false, false) end)
-                stopThinking(c.npc)
-            end
+            standDown(c)
             vlog("Pop: officer %s stays on another player", tostring(data.n))
+            -- The other half of the patrol, when it only came along for a search of our
+            -- player (nobody is being chased here): that search will not happen.
+            local other = c.pair and Pop.copies[c.pair] or nil
+            local chased = false
+            pcall(function() chased = World.player().isChased == true end)
+            if other and other.engaged and not chased then
+                other.engaged, other.calmSince = false, nil
+                standDown(other)
+                Net.send("pa", { n = other.n, on = false }, other.owner)
+            end
         end
         return
     end
@@ -624,7 +645,14 @@ local function onSuspicion(ctx)
     local npc = ctx:get()
     if not valid(npc) then return end
     local key, c = copyOf(npc)
-    if c and not c.engaged and os.clock() < (c.denyUntil or 0) then return end
+    if c and not c.engaged and os.clock() < (c.denyUntil or 0) then
+        -- Its owner keeps it for another player. What the game has just started on this
+        -- copy (it goes on in the game's function after this callback) is taken back.
+        Core.after(0.2, function()
+            if not c.engaged then standDown(c) end
+        end)
+        return
+    end
     if c and not c.engaged then
         c.engaged, c.calmSince, c.target = true, nil, nil
         startThinking(npc)
@@ -644,6 +672,14 @@ end
 for _, fn in ipairs({ "EngageSuspect", "SetChaseMode", "forceSuspect" }) do
     Core.Hooks.add("/Game/Skeletal/NPC/Policeman/PolicemanBaseClass.PolicemanBaseClass_C:" .. fn, onSuspicion)
 end
+-- Both kinds of patrol officer have an EngageSuspect of their own, which is what runs when
+-- one of them decides to search the player (the base class's, hooked above, is empty and
+-- never runs for them). Without these two a copied officer announced the search in this
+-- game ("stand still"), was not driven here, kept walking after its original, and the game
+-- took the growing distance for the player running away (reported with v0.15.1: "the cops
+-- keep walking away and count that as her fleeing").
+Core.Hooks.add("/Game/Skeletal/NPC/Policeman/PM_PatrolLead.PM_PatrolLead_C:EngageSuspect", onSuspicion)
+Core.Hooks.add("/Game/Skeletal/NPC/Policeman/PM_PatrolPartner.PM_PatrolPartner_C:EngageSuspect", onSuspicion)
 
 suspicious = function(npc)
     local ok, result = pcall(function() return npc.alerted == true or npc.suspectMode == true end)
@@ -667,11 +703,72 @@ local function releaseCalmOfficers()
             end
         end
     end
+    -- A copy that is not driven here, with a partner that is not driven here either, cannot
+    -- act on a suspicion: it only walks after its original, and the game would read the
+    -- player it "suspects" as running away from it. It stands down.
+    for _, c in pairs(Pop.copies) do
+        local idle = false
+        if c.family == "police" and not c.engaged and Core.alive(c.npc) and suspicious(c.npc) then
+            local other = c.pair and Pop.copies[c.pair] or nil
+            idle = not (other and other.engaged)
+        end
+        if not idle then
+            c.idleSince = nil
+        else
+            c.idleSince = c.idleSince or now
+            if now - c.idleSince >= 2 then
+                standDown(c)
+                vlog("Pop: a copied officer that is not driven here stopped suspecting the player")
+            end
+        end
+    end
     for _, e in pairs(Pop.owned) do
         if e.localChase and Core.alive(e.npc) and not suspicious(e.npc) then
             e.localChase = false
             if e.driver then stopThinking(e.npc) end
         end
+    end
+end
+
+-- An officer that starts a search tells the player to stand still (`isControled`: no
+-- sprinting, nothing can be used), and only that officer ends it. A copied officer that
+-- went back to following its original never comes. When the player is held and no officer
+-- in this game is after anybody any more, the player is let go.
+local POLICE_BASE = "/Game/Skeletal/NPC/Policeman/PolicemanBaseClass.PolicemanBaseClass_C"
+local HELD_REACH = 6000          -- an officer further away than this is not on its way to a search
+local heldSince = nil
+
+local function releaseHeldPlayer()
+    local player = World.player()
+    local held = false
+    pcall(function()
+        held = player ~= nil and player.isControled == true and player.beenCaught ~= true and player.isChased ~= true
+            and player.disableWorldInteraction ~= true
+    end)
+    if not held then
+        heldSince = nil
+        return
+    end
+    local at = player:K2_GetActorLocation()
+    for _, npc in ipairs(Core.actors(POLICE_BASE) or FindAllOf("PolicemanBaseClass_C") or {}) do
+        local busy = false
+        pcall(function()
+            if Core.alive(npc) and npc.suspectMode == true then
+                local l = npc:K2_GetActorLocation()
+                busy = dist2(at.X, at.Y, at.Z, l.X, l.Y, l.Z) < HELD_REACH * HELD_REACH
+            end
+        end)
+        if busy then
+            heldSince = nil
+            return
+        end
+    end
+    heldSince = heldSince or os.clock()
+    if os.clock() - heldSince >= 3 then
+        heldSince = nil
+        pcall(function() player.isControled = false end)
+        Pop.stats.released = (Pop.stats.released or 0) + 1
+        log("Pop: no officer is coming for the search that was announced; the player may move on")
     end
 end
 
@@ -813,7 +910,10 @@ Core.every(0.5, function()
 end)
 
 Core.every(1, function()
-    if World.shared() and Core.enabled("Population") then releaseCalmOfficers() end
+    if World.shared() and Core.enabled("Population") then
+        releaseCalmOfficers()
+        releaseHeldPlayer()
+    end
 end)
 
 World.listen("start", function(role)

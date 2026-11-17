@@ -28,6 +28,13 @@ local SHOTS = {
     hair = { dist = 58, up = 105, fov = 30, pitch = -18, w = 192, h = 192 },
 }
 Thumbs.SHOTS = SHOTS
+-- Women are shorter: a face, head or hair picture is taken this much lower.
+Thumbs.FEMALE_DROP = { face = 6, head = 9, hair = 12 }
+function Thumbs.lower(spec)
+    local body = spec and spec.look and spec.look.body
+    if type(body) == "string" and body:sub(1, 6) == "SK_fe_" then return -(Thumbs.FEMALE_DROP[spec.shot or "body"] or 0) end
+    return 0
+end
 local BATCH = 2              -- figures put up at the same time (building one takes a while)
 Thumbs.depth = 4000          -- how far below the player the pictures are taken
 Thumbs.tune = nil            -- tests: called with every new capture component
@@ -179,7 +186,7 @@ Core.onTick(function()
             local ok, fig = pcall(Avatar.buildStandIn, e.spec.look, job.x, job.y, job.z, 180, nil)
             if ok and fig then
                 pcall(function()
-                    e.cam:K2_SetActorLocationAndRotation({ X = job.x - e.shot.dist, Y = job.y, Z = job.z + e.shot.up }, { Pitch = e.shot.pitch or 0, Yaw = 0, Roll = 0 }, false, {}, true)
+                    e.cam:K2_SetActorLocationAndRotation({ X = job.x - e.shot.dist, Y = job.y, Z = job.z + e.shot.up + Thumbs.lower(e.spec) }, { Pitch = e.shot.pitch or 0, Yaw = 0, Roll = 0 }, false, {}, true)
                     for _, a in ipairs(fig.actors) do e.comp:ShowOnlyActorComponents(a) end
                     if job.wall then e.comp:ShowOnlyActorComponents(job.wall) end
                 end)

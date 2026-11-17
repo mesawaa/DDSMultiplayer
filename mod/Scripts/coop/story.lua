@@ -4,9 +4,10 @@
 -- that runs on top of it (Eddie's calls, the tutorials, the long-term goals) is kept per
 -- player:
 --
---   * Story state (which calls and steps a player has been through) never leaves that
---     player's game. The host's lives in the host's save as always. A guest's is stored in
---     a file on the guest's computer, one per host, and put back on the next visit.
+--   * Story state (which calls and steps a player has been through) is each player's own.
+--     The host's lives in the host's save as always. A guest's is sent to the host, kept
+--     with the host's world (coop/guests.lua: written beside every save of it) and put
+--     back on the next visit.
 --   * The same goes for what the story looks at: a player's level, experience and skills,
 --     their exposure and reputation, and their dealings with a gang. Which gang approaches
 --     a player is decided by that player's own exposure and reputation.
@@ -18,13 +19,17 @@
 --     shared world that somebody has already brought about (territory that is already
 --     unlocked and the like): it cannot be done twice, so it completes for you as soon as
 --     your story asks for it. What the opening steps need (Eddie on his bench, the first
---     package in its dead drop) is put back for a player who still has to do them.
+--     package in its dead drop) is there for every player who still has to do them: the
+--     dead drop of the first package is a player's own until they have taken theirs.
+--   * Sector B opens for everybody as soon as it is open for one player; sector C, Bad Asia
+--     and La Ballena's day go for everybody as well (coop/facts.lua).
 
 local Core = require("core")
 local Net = require("net")
 local Repl = require("coop.repl")
 local World = require("coop.world")
 local Sync = require("coop.sync")
+local Guests = require("coop.guests")
 local json = require("json")
 
 local log, vlog, valid = Core.log, Core.vlog, Core.valid
@@ -59,7 +64,9 @@ local ELEMENT_DEFAULT = { taskNames = '""', taskDecriptions = '""', taskExpRewar
 local FIRST_DAY = "TAKS-FIRST-DAY-DESC"
 local FIRST_PACK = "TASK-FIRST-PACK-DESC"
 -- The dead drop that holds the first package in an untouched world.
-local FIRST_DROP = { class = "dd_wallVentSmall_C", x = 3580, y = -2220, z = 175 }
+local FIRST_DROP = { class = "dd_wallVentSmall_C", path = "/Game/Interactive/Containers/DeadDrops/dd_wallVentSmall.dd_wallVentSmall_C",
+    x = 3580, y = -2220, z = 175 }
+local WALL = "/Game/WorldControlers/wallCheckpoint.wallCheckpoint_C"
 -- Where the first meeting takes place in an untouched world (read from a new game).
 local EDDIE_CLASS = "/Game/Skeletal/NPC/Eddie/eddieFirstDialogue.eddieFirstDialogue_C"
 local BENCH = { c = "/Game/Interactive/sitDownPlace.sitDownPlace_C", x = 2310, y = 6650, z = 180, yw = 90 }
@@ -125,9 +132,15 @@ local wire = {}            -- foreign task id -> its completion as the rest of t
 local ready = false        -- a guest's own story has been put in place for this world
 local startedFresh = false
 local meetingTried = false       -- false, or the number of times the first meeting was set up
-local packageTried = false
-local profileText = nil    -- last profile written (JSON)
-local profileHost = nil
+-- The dead drop of the first package: `private` while this game keeps it to itself,
+-- `given` once this player's package has been put in.
+local drop = { actor = nil, key = nil, private = false, given = false, searchAt = 0 }
+local wallsAt, wallsTold = 0, false
+local profileText = nil    -- last story sent to the host (JSON)
+-- Without separate storylines (see "without separate storylines" below): `ready` once this
+-- guest's own level and skills are in place, `text` what was last sent to the host,
+-- `hostOff` when the host has said that it keeps no stories.
+local plain = { ready = false, text = nil, hostOff = false }
 local pendingInfo = nil
 
 local function enabled()
@@ -239,6 +252,26 @@ Sync.transform[QM] = {
         values[name] = Repl.joinArray(e)
     end,
     inc = function(values)
+        -- A story task is finished or failed by its owner's game and by no other: what
+        -- another game says about one of ours is not taken.
+        if next(Story.own) ~= nil then
+            local q = Repl.singleton(QM)
+            for _, lower in ipairs({ "taskcompleted", "taskfailed" }) do
+                local name = pick(values, lower)
+                if name and q then
+                    local e = Repl.splitArray(values[name])
+                    local mine = Repl.splitArray(Repl.export(q, { name })[name] or "()")
+                    local changed = false
+                    for id in pairs(Story.own) do
+                        if e[id + 1] and mine[id + 1] and e[id + 1] ~= mine[id + 1] then
+                            e[id + 1] = mine[id + 1]
+                            changed = true
+                        end
+                    end
+                    if changed then values[name] = Repl.joinArray(e) end
+                end
+            end
+        end
         if next(wire) == nil then return end
         local name = pick(values, "taskcompleted")
         if not name then return end
@@ -369,12 +402,24 @@ end
 local function appendTasks(q, list)
     if #list == 0 then return {} end
     local split = splitTable(q)
-    local n = #split.taskNames
+    local n = 0
+    for _, name in ipairs(TABLE_ARRAYS) do n = math.max(n, #split[name]) end
+    for _, name in ipairs(TABLE_ARRAYS) do
+        for i = 1, n do
+            if split[name][i] == nil then split[name][i] = ELEMENT_DEFAULT[name] end
+        end
+    end
     local map = {}
     for _, t in ipairs(list) do
         for _, name in ipairs(TABLE_ARRAYS) do
             local value = t.row and t.row[name] or nil
             if name == "taskCompleted" or name == "taskFailed" then value = "False" end
+            if name == "taskDecriptions" and type(value) == "string" and value:sub(-1) == '"' then
+                -- a guest's rows carry the mark, the host's do not
+                local text = value:sub(1, -2)
+                if text:sub(-#TAG) == TAG then text = text:sub(1, -#TAG - 1) end
+                value = text .. (World.role == "guest" and TAG or "") .. '"'
+            end
             split[name][n + 1] = value or ELEMENT_DEFAULT[name]
         end
         map[t.old] = n
@@ -384,14 +429,21 @@ local function appendTasks(q, list)
     for _, name in ipairs(TABLE_ARRAYS) do values[name] = Repl.joinArray(split[name]) end
     applying = true
     Repl.import(q, values)
-    -- The story's own references to these tasks follow them.
-    local names = {}
-    for _, name in ipairs(Repl.savedVars(q)) do
-        local lower = name:lower()
-        if not Sync.questShared(name) and (lower:find("taskid", 1, true) or lower:find("questid", 1, true)) then
-            names[#names + 1] = name
+    -- The story's own references to these tasks follow them (every variable of the kind,
+    -- not only the ones the game saves: firstDeadDropTaskID is not saved, and the first
+    -- package then closed the row the task had before).
+    local names, seen = {}, {}
+    local function consider(list)
+        for _, name in ipairs(list) do
+            local lower = name:lower()
+            if not seen[lower] and not Sync.questShared(name) and (lower:find("taskid", 1, true) or lower:find("questid", 1, true)) then
+                seen[lower] = true
+                names[#names + 1] = name
+            end
         end
     end
+    consider(Repl.savedVars(q))
+    pcall(function() consider(Repl.propertyNames(q)) end)
     local moved = {}
     for name, text in pairs(Repl.export(q, names)) do
         local new = map[tonumber(text) or -1]
@@ -401,7 +453,7 @@ local function appendTasks(q, list)
     applying = false
     for _, t in ipairs(list) do
         local id = map[t.old]
-        Story.own[id] = { key = t.key, waited = t.waited or 0, row = t.row, marker = t.marker }
+        Story.own[id] = { key = t.key, waited = t.waited or 0, row = t.row, marker = t.marker, back = t.back }
         Story.keys[id] = t.key
         spawnMarker(q, id, t.marker)
     end
@@ -429,7 +481,7 @@ Core.Hooks.add(QM_PATH .. ":createNewTask", function(ctx)
     if key then
         if World.role == "guest" then tagRow(q, id) end
         Story.keys[id] = key
-        Story.own[id] = { key = key, waited = 0 }
+        Story.own[id] = { key = key, waited = 0, row = readRow(q, id) }
         Story.stats.created = Story.stats.created + 1
         vlog("Story: own task %d (%s)", id, key)
         if World.shared() then announceOwn({ id }) end
@@ -562,37 +614,111 @@ local function ensureMeeting(q)
 end
 
 -- The first package: the game fills one particular dead drop while it is flagged as the
--- first one, and finishes the step when that drop has been emptied.
-local function ensureFirstPackage(q)
-    if packageTried then return end
-    local wanted = false
-    for _, rec in pairs(Story.own) do
-        if rec.key == FIRST_PACK then wanted = true end
-    end
-    if not wanted then return end
-    packageTried = true
-    local drop = nil
-    for _, d in ipairs(FindAllOf(FIRST_DROP.class) or {}) do
+-- first one, and finishes the step when that drop has been emptied and closed. There is
+-- one such drop in the world and every player's story sends them to it. Shared like any
+-- other container, the first player to take the package left the others with an empty
+-- drop and a step that could not be done. So while a player still has to fetch theirs,
+-- their game's copy of that drop is their own (Sync.private): what the others take out
+-- of it or put into it does not show there, and their package is put in when their
+-- story asks for it. Afterwards the drop is shared again.
+local function firstDrop()
+    if Core.alive(drop.actor) then return drop.actor end
+    drop.actor = nil
+    if os.clock() < drop.searchAt then return nil end
+    drop.searchAt = os.clock() + 15
+    for _, d in ipairs(Core.actors(FIRST_DROP.path) or FindAllOf(FIRST_DROP.class) or {}) do
         pcall(function()
             if Core.alive(d) then
                 local l = d:K2_GetActorLocation()
-                if math.abs(l.X - FIRST_DROP.x) < 60 and math.abs(l.Y - FIRST_DROP.y) < 60 and math.abs(l.Z - FIRST_DROP.z) < 60 then drop = d end
+                if math.abs(l.X - FIRST_DROP.x) < 60 and math.abs(l.Y - FIRST_DROP.y) < 60 and math.abs(l.Z - FIRST_DROP.z) < 60 then drop.actor = d end
             end
         end)
     end
-    if not drop then
-        log("Story: the dead drop for the first package was not found")
+    if not drop.actor then vlog("Story: the dead drop for the first package was not found") end
+    return drop.actor
+end
+
+local function holdsDrugs(d)
+    local out = {}
+    local ok = pcall(function() d:checkNoDrugs(out) end)
+    if ok and out.DrugsTaken ~= nil then return out.DrugsTaken ~= true end
+    local n = 0
+    pcall(function() n = d.InventoryComponent.ItemNames:GetArrayNum() end)
+    return n > 0
+end
+
+local function ownHas(key)
+    for _, rec in pairs(Story.own) do
+        if rec.key == key then return true end
+    end
+    return false
+end
+
+-- True while this player still has to fetch their first package.
+local function packagePending(q)
+    return q.firstDeadDrop ~= true and (ownHas(FIRST_PACK) or ownHas(FIRST_DAY))
+end
+
+local function tendFirstPackage(q)
+    if not packagePending(q) then
+        -- this player has had theirs (or has no such step): the drop is everybody's
+        if drop.private then
+            drop.private = false
+            Sync.setPrivate(drop.key, false)
+            vlog("Story: the first package's dead drop is shared again")
+        end
         return
     end
-    if drop.firstDeadDrop == true then return end
+    local d = firstDrop()
+    if not d then return end
+    if not drop.private then
+        drop.key = Repl.key(d)
+        drop.private = true
+        Sync.setPrivate(drop.key, true)
+        if World.role == "guest" then
+            -- the loaded copy holds what the host's drop held, which is not this player's
+            pcall(function() d:clearContainer() end)
+            pcall(function() d.firstDeadDrop = false end)
+        end
+        vlog("Story: the first package's dead drop is this player's own for now")
+    end
+    if drop.given or not ownHas(FIRST_PACK) then return end
+    drop.given = true
     local ok, e = pcall(function()
-        drop.firstDeadDrop = true
-        drop:ExecuteUbergraph_dd_wallVentSmall(15)   -- the part of its start-up that puts the package in
+        local filled = holdsDrugs(d)         -- a new game's own package is already there
+        d.firstDeadDrop = true
+        if not filled then d:ExecuteUbergraph_dd_wallVentSmall(15) end   -- the part of its start-up that puts the package in
     end)
     if ok then
         log("Story: the first package is waiting in its dead drop")
     else
         log("Story: could not place the first package: %s", tostring(e))
+    end
+end
+
+-- Sector B: the game opens the wall's checkpoints in the game whose player reaches the
+-- level for it, and when a save is loaded. The fact itself is shared (the quest manager's
+-- secondMapZoneUnlocked), so every other game opens its checkpoints here as soon as it
+-- learns of it.
+local function tendWalls(q)
+    if q.secondMapZoneUnlocked ~= true or os.clock() < wallsAt then return end
+    wallsAt = os.clock() + 4
+    local opened = 0
+    for _, c in ipairs(Core.actors(WALL) or {}) do
+        pcall(function()
+            -- `loaded`: the checkpoint has had its own look at the fact (a second after it appears)
+            if Core.alive(c) and c.loaded == true and c.checkPointActive ~= true then
+                c:openCheckpoint()
+                opened = opened + 1
+            end
+        end)
+    end
+    if opened > 0 then
+        log("Story: sector B is open in this world; %d checkpoint(s) of the wall opened here", opened)
+        if not wallsTold then
+            wallsTold = true
+            Net.notify("Sector B is open.")
+        end
     end
 end
 
@@ -634,9 +760,18 @@ local function watch(q)
         local rec = Story.own[id]
         if not rec then
             -- finished by an earlier step of this loop
-        elseif id >= length(q) or readKey(q, id) ~= rec.key then
-            -- The row was overwritten: both games added a task at the same moment.
-            lost[#lost + 1] = { old = id, key = rec.key, row = rec.row, waited = rec.waited, marker = rec.marker }
+        elseif id >= length(q) or readKey(q, id) ~= rec.key or isTagged(q, id) ~= (World.role == "guest") then
+            -- The row was overwritten: both games added a task at the same moment. (Also
+            -- when both added the same step: a guest's rows carry the mark, the host's do not.)
+            -- Without the row as it was made there is nothing to put back, and a task that
+            -- keeps getting lost is left alone after a few times.
+            local back = (rec.back or 0) + 1
+            if rec.row and back <= 4 then
+                lost[#lost + 1] = { old = id, key = rec.key, row = rec.row, waited = rec.waited, marker = rec.marker, back = back }
+            else
+                Story.own[id] = nil
+                log("Story: own task %d (%s) was overwritten and cannot be put back", id, tostring(rec.key))
+            end
         elseif closed(q, id) then
             Story.own[id] = nil
         else
@@ -657,7 +792,11 @@ local function watch(q)
         end
     end
     if #lost > 0 then
-        for _, t in ipairs(lost) do Story.own[t.old] = nil end
+        for _, t in ipairs(lost) do
+            Story.own[t.old] = nil
+            -- the row is another player's task now
+            if t.old < length(q) and isTagged(q, t.old) ~= (World.role == "guest") then addForeign(t.old, readKey(q, t.old)) end
+        end
         local map = appendTasks(q, lost)
         local ids = {}
         for _, id in pairs(map) do ids[#ids + 1] = id end
@@ -708,12 +847,6 @@ local function freshStory(q)
     return { vars = vars, extra = {} }
 end
 
-local function profilePath(host)
-    local base = os.getenv("LOCALAPPDATA")
-    local dir = base and (base:gsub("\\", "/") .. "/DrugDealerSimulator/Saved/SaveGames") or Core.MOD_DIR
-    return string.format("%s/ddsmp_story_%s%s.json", dir, tostring(host):gsub("[^%w]", ""), Core.instance and ("_" .. Core.instance) or "")
-end
-
 local function buildProfile(q)
     local p = { v = 2, vars = Repl.export(q, personalNames(q)), tasks = {}, extra = {} }
     for _, m in ipairs(COMPANIONS) do
@@ -724,48 +857,28 @@ local function buildProfile(q)
         p.tasks[#p.tasks + 1] = { i = id, k = rec.key, w = math.floor(rec.waited or 0), r = rec.row, m = rec.marker }
     end
     table.sort(p.tasks, function(a, b) return a.i < b.i end)
+    -- what this game holds only because of another player (coop/facts.lua) is not stored
+    if Story.profileFilter then pcall(Story.profileFilter, p) end
     return p
 end
 
+-- Sends the story as it stands to the host, when it changed since the last time.
 local function saveProfile(q, role)
-    if (role or World.role) ~= "guest" or not ready or not profileHost then return end
-    if q then
-        local ok, text = pcall(function() return json.encode(buildProfile(q)) end)
-        if not ok then
-            log("Story: could not store the story (%s)", tostring(text))
-            return
-        end
-        if text == profileText then return end
-        profileText = text
-    end
-    if not profileText then return end
-    local path = profilePath(profileHost)
-    local f = io.open(path .. ".tmp", "wb")
-    if not f then
-        log("Story: cannot write %s", path)
+    if (role or World.role) ~= "guest" or not ready or not q then return end
+    local ok, profile = pcall(buildProfile, q)
+    if not ok then
+        log("Story: could not store the story (%s)", tostring(profile))
         return
     end
-    f:write(profileText)
-    f:close()
-    os.remove(path)
-    os.rename(path .. ".tmp", path)
-end
-
-local function loadProfile(host)
-    local f = io.open(profilePath(host), "rb")
-    if not f then return nil end
-    local text = f:read("a")
-    f:close()
-    local ok, p = pcall(json.decode, text)
-    if ok and type(p) == "table" and type(p.vars) == "table" then return p end
-    log("Story: the stored story for this host cannot be read, starting over")
-    return nil
+    local okText, text = pcall(json.encode, profile)
+    if not okText or text == profileText then return end
+    if Guests.sendStory(profile) then profileText = text end
 end
 
 -- Replaces the story state loaded from the host's save with this player's own.
 local function install(q, info)
-    profileHost = Net.S.owner
-    local p = loadProfile(profileHost)
+    local p = Guests.story()
+    if type(p) ~= "table" or type(p.vars) ~= "table" then p = nil end
     startedFresh = p == nil
     local source = p or freshStory(q)
     if not source then
@@ -801,16 +914,33 @@ local function install(q, info)
             else
                 log("Story: the new-game values of %s are not available; keeping the host's", m.class)
             end
+        else
+            log("Story: %s was not found; its values stay the host's", m.class)
         end
     end
+    -- (for reports: what this player has in this world from here on)
+    pcall(function()
+        local s = Repl.singleton("statisticsManager_C")
+        local function n(v) return string.format("%.0f", tonumber(v) or -1) end
+        log("Story: your level %s and skills are in place (%s): lock picking %s, pockets %s, stamina %s, runner %s, stealth %s, illusionist %s, salesman %s, quick learner %s; %s point(s) to spend",
+            tostring(s.playerLevel), p and (type(p.extra) == "table" and type(p.extra.statisticsManager_C) == "table" and "as the host had them stored" or "the stored character had none: a new game's") or "a new character",
+            n(s.skillLevelLockpick), n(s.skillLevelPockets), n(s.skillLevelStamina), n(s.skillLevelRunner), n(s.skillLevelStealth), n(s.skillLevelIllusionist),
+            n(s.skillLevelSalesman), n(s.skillLevelQuickLearner), tostring(s.playerSkillPoints))
+    end)
 
-    local missing = {}
+    local missing, reopen = {}, {}
     if p and type(p.tasks) == "table" then
         local n = length(q)
         for _, t in ipairs(p.tasks) do
             local id = tonumber(t.i)
             if id and type(t.k) == "string" then
-                if id < n and readKey(q, id) == t.k and isTagged(q, id) and not closed(q, id) and not Story.foreign[id] then
+                local failed = false
+                pcall(function() failed = q.taskFailed[id + 1] == true end)
+                if id < n and readKey(q, id) == t.k and isTagged(q, id) and not failed and not Story.foreign[id] then
+                    -- The host's game holds a guest's open task as completed (it is kept out
+                    -- of the host's list that way) and saves the world like that: the row is
+                    -- this player's own and still open, so it is opened again here.
+                    if closed(q, id) then reopen[#reopen + 1] = id end
                     Story.own[id] = { key = t.k, waited = tonumber(t.w) or 0, row = t.r, marker = t.m }
                     Story.keys[id] = t.k
                     if not markerOf(id) then spawnMarker(q, id, t.m) end
@@ -820,9 +950,28 @@ local function install(q, info)
             end
         end
     end
+    if #reopen > 0 then
+        local e = Repl.splitArray(Repl.export(q, { "taskCompleted" }).taskCompleted or "()")
+        for _, id in ipairs(reopen) do
+            if e[id + 1] then e[id + 1] = "False" end
+        end
+        applying = true
+        Repl.import(q, { taskCompleted = Repl.joinArray(e) })
+        applying = false
+    end
     appendTasks(q, missing)
     ready = true
     Story.stats.restored = Story.stats.restored + 1
+
+    if info.fp == true and q.firstDeadDrop == true then
+        -- This player has had their first package; the loaded copy of its dead drop holds
+        -- the host's, which the host still has to fetch.
+        local d = firstDrop()
+        if d then
+            pcall(function() d:clearContainer() end)
+            pcall(function() d.firstDeadDrop = false end)
+        end
+    end
 
     local mine = {}
     for id in pairs(Story.own) do mine[#mine + 1] = id end
@@ -871,10 +1020,16 @@ local function describeWorld(q)
     for key in pairs(Story.worldDone) do
         if not seen[key] then dn[#dn + 1] = key end
     end
-    return { st = st, sk = sk, dn = dn }
+    -- fp: the first package's dead drop is the host's own for now (what the saved world
+    -- holds in it is not a newcomer's to take)
+    return { st = st, sk = sk, dn = dn, fp = drop.private == true or packagePending(q) }
 end
 
 local function tellStory(id)
+    if World.role == "host" and not enabled() and World.inWorld[id] then
+        -- (a guest whose own game has the storylines on would wait for a story for ever)
+        Net.send("soff", {}, id)
+    end
     if World.role ~= "host" or not enabled() then return end
     local q = manager()
     if not q then return end
@@ -903,9 +1058,12 @@ end)
 local function reset()
     Story.own, Story.foreign, Story.keys, Story.worldDone = {}, {}, {}, {}
     wire = {}
-    ready, startedFresh, meetingTried, packageTried, pendingInfo, installAt = false, false, false, false, nil, nil
+    ready, startedFresh, meetingTried, pendingInfo, installAt = false, false, false, nil, nil
     meetingAt, askAt = nil, nil
-    profileText, profileHost = nil, nil
+    profileText = nil
+    plain.ready, plain.text, plain.hostOff = false, nil, false
+    drop = { actor = nil, key = nil, private = false, given = false, searchAt = 0 }
+    wallsAt, wallsTold = 0, false
 end
 
 World.listen("start", function(role)
@@ -928,12 +1086,14 @@ Core.every(STEP, function()
     local q = manager()
     if not q then return end
     if World.role == "guest" and not ready then
+        if plain.hostOff then return end
         if not pendingInfo and os.clock() >= (askAt or 0) then
             -- nothing heard about the story yet (after the first wait): ask the host
             if askAt then Net.send("sreq", {}, World.host or Net.S.owner) end
             askAt = os.clock() + 15
         end
-        if pendingInfo and os.clock() >= (installAt or 0) then
+        -- (the host's answer about this player's character must be in as well)
+        if pendingInfo and Guests.received and os.clock() >= (installAt or 0) then
             local info = pendingInfo
             pendingInfo = nil
             local ok, e = xpcall(install, debug.traceback, q, info)
@@ -950,23 +1110,93 @@ Core.every(STEP, function()
     if not ok then log("Story: %s", tostring(e)) end
     ok, e = pcall(ensureMeeting, q)
     if not ok then log("Story: %s", tostring(e)) end
-    ok, e = pcall(ensureFirstPackage, q)
+    ok, e = pcall(tendFirstPackage, q)
+    if not ok then log("Story: %s", tostring(e)) end
+    ok, e = pcall(tendWalls, q)
     if not ok then log("Story: %s", tostring(e)) end
 end)
 
--- Stored every few seconds: saveProfile writes only when something changed, and a guest
--- that loses the host (or crashes) restarts from what was stored last.
+-- Sent every few seconds: saveProfile sends only when something changed, and a guest
+-- that loses the host (or crashes) restarts from what the host had last.
 Core.every(5, function()
     if not active() or World.role ~= "guest" or not ready then return end
     local q = manager()
     if q then pcall(saveProfile, q) end
 end)
 
+---------------------------------------------------------------- without separate storylines
+
+-- A player's level, experience, skill points and skills are their own whatever the
+-- settings say: coop/sync.lua never exchanges them. Everything above puts a guest's own
+-- in place and stores them with the host, and all of it is off when Sync.Story (or
+-- Sync.Orders) is switched off. A guest then had, in every session anew, what the host's
+-- save holds, the host's level and skills, and what they spent was gone with the session
+-- (reported with v0.15.1: "her skills reset and look identical to the hosts"). In that
+-- case these few variables are kept by themselves: sent to the host when they change,
+-- stored in the guest's record beside the host's saves (`sheet`, coop/guests.lua), and put
+-- back on arrival. A guest the host has nothing for starts from what the host's save
+-- holds, as it always did with one storyline for everybody, and keeps it from there.
+Net.on("soff", function(sender)
+    if World.role == "guest" and sender == (World.host or Net.S.owner) and not ready then plain.hostOff = true end
+end)
+
+local function plainMode()
+    return World.active and World.role == "guest" and not ready and (not enabled() or plain.hostOff)
+end
+
+local function plainNames(s)
+    local out = {}
+    for _, name in ipairs(Sync.personalNames("statisticsManager_C", s)) do
+        if name:lower() ~= "firstlaunch" then out[#out + 1] = name end
+    end
+    return out
+end
+
+local function tendPlain()
+    local s = Repl.singleton("statisticsManager_C")
+    if not s then return end
+    if not plain.ready then
+        -- the host's answer about this player's character must be in
+        if not Guests.received then return end
+        local stored = Guests.sheet()
+        local n = 0
+        if type(stored) == "table" then
+            local allowed, filtered = {}, {}
+            for _, name in ipairs(plainNames(s)) do allowed[name] = true end
+            for name, text in pairs(stored) do
+                if allowed[name] and type(text) == "string" then filtered[name] = text end
+            end
+            n = Repl.import(s, filtered)
+        end
+        plain.ready = true
+        local function f(v) return string.format("%.0f", tonumber(v) or -1) end
+        log("Story: one storyline for everybody (%s); your level %s and skills are %s: lock picking %s, pockets %s, stamina %s, runner %s, stealth %s, illusionist %s, salesman %s, quick learner %s; %s point(s) to spend",
+            plain.hostOff and enabled() and "the host's setting" or "Sync.Story or Sync.Orders is off", tostring(s.playerLevel),
+            n > 0 and "your own again, as the host had them stored" or "those of the host's save (the host had none stored for you)",
+            f(s.skillLevelLockpick), f(s.skillLevelPockets), f(s.skillLevelStamina), f(s.skillLevelRunner), f(s.skillLevelStealth), f(s.skillLevelIllusionist),
+            f(s.skillLevelSalesman), f(s.skillLevelQuickLearner), tostring(s.playerSkillPoints))
+        return
+    end
+    local values = Repl.export(s, plainNames(s))
+    local ok, text = pcall(json.encode, values)
+    if not ok or text == plain.text then return end
+    if Guests.sendSheet(values) then plain.text = text end
+end
+
+Core.every(2, function()
+    if not plainMode() then return end
+    local ok, e = xpcall(tendPlain, debug.traceback)
+    if not ok then log("Story: %s", tostring(e)) end
+end)
+
 Story.firstMeetingSeat, Story.firstMeetingEddie = firstMeetingSeat, firstMeetingEddie
 
 function Story.isApplying() return applying end
 function Story.hidden() return wire end
-function Story.isReady() return ready end
+-- (true as well once a guest's own level and skills are in place without a story of its own)
+function Story.isReady() return ready or plain.ready end
 function Story.isFresh() return startedFresh end
+function Story.has(key) return ownHas(key) end
+function Story.firstDropState() return drop end
 
 return Story

@@ -185,10 +185,52 @@ local SKIP_BASES = { "/Script/Engine.Pawn", "/Game/Player/playerCharacterBP.play
     "/Game/WorldControlers/Gangs/gangDeadDropBase.gangDeadDropBase_C",
     "/Game/Interactive/Containers/Special/ContainerMoneyDeposit.ContainerMoneyDeposit_C" }
 
+-- Drug-lab equipment (jars, the metal box, mortars, mills, mixing trays, flasks) draws
+-- what it holds only at certain moments of its own: a jar sets the text and the colour of
+-- its label one second after it comes to life and when its own player labels it; a mortar
+-- or tray shows its heap when its own player changes the amount. Variables that arrive
+-- from another game change none of that: a jar a friend had filled and labelled kept its
+-- white lid and the word EMPTY here until the game was loaded again, though it held the
+-- drugs all along. So after such variables have been put in, the drawing is done here.
+-- Nothing below changes a saved variable.
+local EQUIPMENT = "/Game/Drugs/DrugLab/workStationEquipmentBase.workStationEquipmentBase_C"
+local ADDITIVE = "/Game/Drugs/DrugLab/AdditiveContainers/additiveContainerBase.additiveContainerBase_C"
+Sync.stats = Sync.stats or {}
+
+local function refreshEquipment(obj)
+    local base = Core.class(EQUIPMENT)
+    if not base then return end           -- the class is not even loaded: nothing of the kind exists
+    local ok, is = pcall(function() return obj:IsA(base) end)
+    if not ok or not is then return end
+    Sync.stats.equipment = (Sync.stats.equipment or 0) + 1
+    -- mortars, mills, trays, flasks: the heap inside (its own function only shows and sizes it)
+    pcall(function() obj:quantityChanged() end)
+    local additive = Core.class(ADDITIVE)
+    local okA, isA = pcall(function() return additive ~= nil and obj:IsA(additive) end)
+    if not okA or not isA then return end
+    -- jars and boxes: the lid's colour (a material made for it, as the jar itself makes one)
+    pcall(function()
+        local material = obj.dynamicMaterial
+        if not valid(material) then
+            local model = obj.Model
+            material = model:CreateDynamicMaterialInstance(0, model:GetMaterial(0), FName("None"))
+            obj.dynamicMaterial = material
+        end
+        if valid(material) then material:SetVectorParameterValue(FName("Color"), obj.labelColor) end
+    end)
+    -- ... and the word on the label
+    pcall(function()
+        local widget = obj.labelWidget:GetUserWidgetObject()
+        if valid(widget) then widget.txtLabel:SetText(FText(obj.label:ToString())) end
+    end)
+end
+Sync.refreshEquipment = refreshEquipment
+
 local function refreshNearby(obj)
     -- Containers repaint their open inventory window through this; other classes lack it.
     pcall(function() obj:resetContentSizes() end)
     pcall(function() obj:RamaLoaded() end)
+    pcall(refreshEquipment, obj)
 end
 
 ---------------------------------------------------------------- container contents
@@ -411,10 +453,13 @@ local function mergeManager(obj, className, values, data)
                 local theirs = Repl.splitArray(text)
                 local own = Repl.export(obj, { name })[name]
                 local mine = own and Repl.splitArray(own) or nil
-                if mine and #mine == #theirs then
+                -- (The lengths can differ: this game has added a client or an order since
+                -- the sender last heard from it. The sender changed single elements of the
+                -- array as it knew it; those are taken, the length stays ours.)
+                if mine and #mine > 0 and #theirs > 0 then
                     for _, i in ipairs(list) do
                         i = tonumber(i)
-                        if i and theirs[i] ~= nil then mine[i] = theirs[i] end
+                        if i and theirs[i] ~= nil and mine[i] ~= nil then mine[i] = theirs[i] end
                     end
                     local merged = Repl.joinArray(mine)
                     if merged ~= text then
@@ -433,11 +478,37 @@ end
 local tracked = {}   -- id -> { base = name -> text }
 local sentAt = {}    -- id -> when this game last sent a change of it
 
+-- Objects that are one player's own for the time being (the dead drop of the first package
+-- while that player still has to fetch theirs: coop/story.lua). Nothing of such an object
+-- is sent from this game and nothing that arrives for it is put in. When that is over the
+-- object takes the state the others have: this game asks for it.
+Sync.private = {}    -- key -> true
+
+function Sync.setPrivate(key, on)
+    if type(key) ~= "string" then return end
+    if on then
+        Sync.private[key] = true
+        return
+    end
+    if not Sync.private[key] then return end
+    Sync.private[key] = nil
+    tracked[key] = nil
+    for _, id in ipairs(World.others()) do Repl.send("opull", { k = key }, id) end
+end
+
+-- A container's isOpen says that this game's player has it open right now. Sent across it
+-- shut the container in the other game (the game opens nothing that already reads open)
+-- and could end up in a save that way, shut for everybody for good (the repair at the end
+-- of this file opens such a container again).
+local function localOnly(obj, className, name)
+    return name == "isOpen" and isContainer(obj, className)
+end
+
 local function names(obj, className)
     local list = Repl.savedVars(obj)
     local out = {}
     for _, name in ipairs(list) do
-        if not personal(className, name) then out[#out + 1] = name end
+        if not personal(className, name) and not localOnly(obj, className, name) then out[#out + 1] = name end
     end
     return out
 end
@@ -511,11 +582,20 @@ Repl.on("st", function(sender, data)
     local className = tostring(data.c)
     local manager = MANAGERS[className]
     if manager and not Core.enabled(manager.feature) then return end
+    if Sync.private[data.id] then
+        if World.role == "host" then
+            for id in pairs(World.inWorld) do
+                if id ~= sender then Repl.send("st", { id = data.id, c = className, v = data.v, ix = data.ix, lg = data.lg }, id) end
+            end
+        end
+        return
+    end
     local obj = locate(data.id, className)
     if not obj then return end
     local values, count = {}, 0
     for name, text in pairs(data.v) do
         local allowed = type(name) == "string" and type(text) == "string" and not personal(className, name)
+            and not localOnly(obj, className, name)
         -- A guest never overrides what the host owns.
         if allowed and World.role == "host" and ((manager and manager.hostOnlyAll) or hostOnly(name)) then allowed = false end
         if allowed then
@@ -524,6 +604,34 @@ Repl.on("st", function(sender, data)
         end
     end
     if count == 0 then return end
+    -- The sales manager keeps one element per client and per order in dozens of arrays
+    -- that only ever grow. A guest that changes one while the host has just added a client
+    -- or an order sends a copy that is one short; taken whole it cut the host's array down
+    -- and left arrays of different lengths (the game then made orders for a client that
+    -- half existed, one every frame). Such a copy is not taken; the guest gets the host's.
+    if World.role == "host" and className == "salesManager_C" then
+        local back = nil
+        for name, text in pairs(values) do
+            local lower = name:lower()
+            if (lower:sub(1, 6) == "client" or lower:sub(1, 9) == "orderlist") and text:sub(1, 1) == "("
+                and not (type(data.ix) == "table" and data.ix[name]) then
+                local own = Repl.export(obj, { name })[name]
+                if own and #Repl.splitArray(text) < #Repl.splitArray(own) then
+                    back = back or {}
+                    back[name] = own
+                end
+            end
+        end
+        if back then
+            for name in pairs(back) do
+                values[name] = nil
+                count = count - 1
+            end
+            Repl.send("st", { id = data.id, c = className, v = wire(className, back) }, sender)
+            vlog("Sync: %s sent arrays that are shorter than this game's; it gets ours back", Net.name(sender))
+            if count <= 0 then return end
+        end
+    end
     local relay = {}
     for name, text in pairs(values) do relay[name] = text end
     local transform = Sync.transform[className]
@@ -778,9 +886,16 @@ end
 local function lookAt(e, targets)
     e.queued = false
     lookedAt[e.key] = os.clock()
+    if Sync.private[e.key] then return end
     if Core.alive(e.actor) then
         if not skipped(e.actor, e.class) then
-            if e.seen == nil then e.interactive = Dyn.isInteractive(e.actor) end
+            if e.seen == nil then
+                e.interactive = Dyn.isInteractive(e.actor)
+                -- what a player aims with at a work station is no object of the world
+                -- (coop/dyn.lua): nothing of it is sent, and its end is nobody's loss
+                e.gizmo = e.interactive and Dyn.isGizmo(e.actor)
+            end
+            if e.gizmo then return end
             e.seen = true
             local a = Core.profile and os.clock()
             local ok, err = pcall(diff, e.key, e.actor, e.class, false, targets, false)
@@ -853,7 +968,7 @@ local function workSweeps()
             while s.i <= #s.list and looked < SWEEP_PER_TICK do
                 local e = s.list[s.i]
                 s.i = s.i + 1
-                if Core.alive(e.actor) and not skipped(e.actor, e.class) and isContainer(e.actor, e.class) then
+                if Core.alive(e.actor) and not Sync.private[e.key] and not skipped(e.actor, e.class) and isContainer(e.actor, e.class) then
                     looked = looked + 1
                     local ok, h = pcall(contentHash, e.actor, e.class)
                     if ok and h then out[#out + 1], out[#out + 2] = e.key, h end
@@ -877,7 +992,7 @@ Repl.on("ckb", function(sender, data)
     local need, now = {}, os.clock()
     for i = 1, #data.l - 1, 2 do
         local key, h = data.l[i], data.l[i + 1]
-        local obj = type(key) == "string" and Repl.known(key) or nil
+        local obj = type(key) == "string" and not Sync.private[key] and Repl.known(key) or nil
         -- what we changed ourselves a moment ago is on its way to the host: not undone
         if obj and now - (sentAt[key] or -100) > 30 then
             local ok, mine = pcall(function() return contentHash(obj, obj:GetClass():GetFName():ToString()) end)
@@ -895,7 +1010,7 @@ Repl.on("ckn", function(sender, data)
     local n = 0
     for i, key in ipairs(data.l) do
         if i > 60 then break end
-        local obj = type(key) == "string" and Repl.known(key) or nil
+        local obj = type(key) == "string" and not Sync.private[key] and Repl.known(key) or nil
         if obj then
             local ok = pcall(function()
                 local className = obj:GetClass():GetFName():ToString()
@@ -905,6 +1020,18 @@ Repl.on("ckn", function(sender, data)
         end
     end
     log("Sync: %d container(s) sent again to %s (changed while they were loading)", n, Net.name(sender))
+end)
+
+-- One object in full, for a game whose own copy of it has just stopped being private.
+Repl.on("opull", function(sender, data)
+    if not World.active or not World.isPeer(sender) or type(data.k) ~= "string" or Sync.private[data.k] then return end
+    local obj = Repl.known(data.k) or Repl.find(data.k)
+    if not obj then return end
+    pcall(function()
+        local className = obj:GetClass():GetFName():ToString()
+        Repl.send("st", { id = data.k, c = className, v = wire(className, Repl.export(obj, names(obj, className))) }, sender)
+        vlog("Sync: sent %s in full to %s", data.k, Net.name(sender))
+    end)
 end)
 
 ---------------------------------------------------------------- mechanism 3: mirrored actions
@@ -1085,6 +1212,7 @@ end)
 World.listen("stop", function()
     tracked, managerDue = {}, {}
     sentAt, sweeps = {}, {}
+    Sync.private = {}
 end)
 
 -- A guest that has just loaded gets the host's current manager state, since the world
@@ -1127,6 +1255,7 @@ Core.onTick(pollClock)
 function Sync.pushObject(actor)
     local targets = World.targets()
     if #targets == 0 or not Core.alive(actor) then return false end
+    if Sync.private[Repl.key(actor)] then return false end
     local ok, err = pcall(function()
         -- in full: a first look at an object only notes its state, and this one has never
         -- been looked at by anybody
@@ -1135,6 +1264,35 @@ function Sync.pushObject(actor)
     if not ok then log("Sync: pushing an object failed: %s", tostring(err)) end
     return ok
 end
+
+-- A container that reads open while this game's player has no inventory open is stuck
+-- (older versions sent isOpen across, and saved worlds still have it): the game ignores a
+-- player who tries to open it. When that happens it is opened properly. In single player
+-- too, where such a save may be played.
+local reopening = false
+Core.Hooks.add(CONTAINER_BASE .. ":openContainer", function(ctx)
+    if reopening then return end
+    local c = ctx:get()
+    local player = World.player()
+    if not valid(c) or not player then return end
+    local stuck = false
+    pcall(function() stuck = c.isOpen == true and player.inventoryOpen ~= true and player.atWorkStation ~= true end)
+    if not stuck then return end
+    Core.after(0.05, function()
+        local p = World.player()
+        if reopening or not p or not Core.alive(c) then return end
+        local still = false
+        pcall(function() still = c.isOpen == true and p.inventoryOpen ~= true and p.atWorkStation ~= true end)
+        if not still then return end
+        reopening = true
+        local ok, e = pcall(function()
+            c.isOpen = false
+            c:openContainer()
+        end)
+        reopening = false
+        log("Sync: %s read open with nobody at it; opened again%s", c:GetFName():ToString(), ok and "" or (" (failed: " .. tostring(e) .. ")"))
+    end)
+end)
 
 function Sync.isApplying() return applying end
 function Sync.tracked() return tracked end

@@ -57,7 +57,8 @@ local RANKS = { "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"
 local SUITS = { "\226\153\160", "\226\153\165", "\226\153\166", "\226\153\163" }   -- spade heart diamond club
 local BAR = "/Game/ModularBarInterior/"
 
-local function active() return (World.active or Casino.debug) and Core.config.Casino ~= false end
+-- In co-op, and in single player too unless SoloExtras is false (World.extras).
+local function active() return (World.extras() or Casino.debug) and Core.config.Casino ~= false end
 local function key(name) return tostring(Core.config[name] or "?") end
 
 ---------------------------------------------------------------- the room
@@ -1460,9 +1461,30 @@ Look.takeover = {
     choose = function() end,
 }
 
+-- In single player no "stop" comes when the world goes (back to the main menu, another
+-- save loaded): a seat in a world that is gone is only forgotten. Its actors went with
+-- it; nothing of them may be touched.
+local function forgetGoneWorld()
+    Casino.seated, g = false, nil
+    local s = scr
+    scr, shown = nil, {}
+    if s then
+        s.onClose = nil
+        pcall(s.close)          -- (a screen whose world is gone is only forgotten, see screen.lua)
+    end
+    seat = nil
+    Avatar.noEmoteView, Avatar.sendZ = nil, nil
+    for key in pairs(felt) do felt[key] = nil end
+    for id in pairs(seatOf) do seatOf[id] = nil end
+end
+
 local marker = nil
 Core.every(1, function()
     if not live() then return end
+    if seat and not World.active then
+        local player = World.player()
+        if not player or player:GetAddress() ~= seat.owner then forgetGoneWorld() end
+    end
     if not World.player() or not active() then return end
     ensureRoom()
     if room then

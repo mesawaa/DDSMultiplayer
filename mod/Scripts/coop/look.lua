@@ -21,27 +21,62 @@ local Hud = require("coop.hud")
 local Screen = require("coop.screen")
 local Thumbs = require("coop.thumbs")
 local Clerk = require("coop.clerk")
+local Guests = require("coop.guests")
 local json = require("json")
 
 local log, vlog, valid = Core.log, Core.vlog, Core.valid
 
 local Look = { page = nil, index = 1 }
 
+-- A body "MESH#MATERIAL" is the mesh in another of the game's colours (coop/avatar.lua). A
+-- colour costs what the outfit it is a colour of costs.
 local OUTFITS = {
-    { id = "jacket", starter = true, name = "Yellow jacket", body = "SK_ma_casual_jacket_01_a", price = 200 },
-    { id = "jacket2", name = "Dark jacket", body = "SK_ma_casual_jacket_01_b", price = 400 },
+    { id = "jacket", starter = true, name = "Yellow jacket", body = "SK_ma_casual_jacket_01_a", price = 800 },
+    { id = "jacket2", name = "Dark jacket", body = "SK_ma_casual_jacket_01_b#MI_casual_jacket_01_dark", price = 800 },
+    { id = "jacket3", name = "Black jacket", body = "SK_ma_casual_jacket_01_a#MI_casual_jacket_equipmentGuy", price = 1000 },
     { id = "shirt1", starter = true, name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a", price = 250 },
-    { id = "shirt2", name = "Shirt, second cut", body = "SK_ma_casual_02_b", price = 250 },
-    { id = "shirt3", name = "Shirt, third cut", body = "SK_ma_casual_02_c", price = 250 },
+    { id = "shirt1b", name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a#MI_casual_02_blue", price = 250 },
+    { id = "shirt1r", name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a#MI_casual_02_red", price = 250 },
+    { id = "shirt1g", name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a#MI_casual_02_seedGuy", price = 250 },
+    { id = "shirt1c", name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a#MI_casual_DeadDealer02", price = 250 },
+    { id = "shirt1p", name = "Shirt, rolled sleeves", body = "SK_ma_casual_02_a#MI_casual_jay", price = 250 },
     { id = "track1", starter = true, name = "Tracksuit", body = "SK_ma_sport_01_a", price = 450 },
-    { id = "track2", name = "Tracksuit, second colour", body = "SK_ma_sport_01_b", price = 500 },
-    { id = "track3", name = "Tracksuit, third colour", body = "SK_ma_sport_01_c", price = 500 },
-    { id = "work1", starter = true, name = "Work clothes", body = "SK_ma_construction_worker_01", price = 300 },
-    { id = "work2", name = "Work clothes, second set", body = "SK_ma_construction_worker_01_c", price = 300 },
-    { id = "waiter", name = "Waiter", body = "SK_ma_waiter_01", price = 900 },
-    { id = "doctor", name = "Doctor's coat", body = "SK_ma_physician_01", price = 1200 },
-    { id = "suit1", name = "Suit", body = "SK_ma_business_01", price = 2000 },
-    { id = "suit2", name = "Suit, second cut", body = "SK_ma_business_01_b", price = 2000 },
+    { id = "track1w", name = "Tracksuit", body = "SK_ma_sport_01_a#MI_ma_sport_01_red", price = 450 },
+    { id = "track1n", name = "Tracksuit", body = "SK_ma_sport_01_a#MI_ma_sport_01_base", price = 450 },
+    { id = "track1k", name = "Tracksuit", body = "SK_ma_sport_01_a#MI_ma_sport_Sicario", price = 450 },
+    { id = "track2", name = "Sports T-shirt", body = "SK_ma_sport_01_b", price = 500 },
+    { id = "track2d", name = "Sports T-shirt", body = "SK_ma_sport_01_b#MI_ma_sport_02_dark", price = 500 },
+    { id = "track2k", name = "Sports T-shirt", body = "SK_ma_sport_01_b#MI_ma_sport_02_dark2", price = 500 },
+    { id = "track3", name = "Sweatshirt", body = "SK_ma_sport_01_c", price = 500 },
+    { id = "track3o", name = "Sweatshirt", body = "SK_ma_sport_01_c#MI_ma_sport_01_blue", price = 500 },
+    { id = "track3w", name = "Sweatshirt", body = "SK_ma_sport_01_c#MI_ma_sport_01_red", price = 500 },
+    { id = "work1", starter = true, name = "Work clothes", body = "SK_ma_construction_worker_01", price = 200 },
+    { id = "work1d", name = "Work clothes", body = "SK_ma_construction_worker_01#MI_construction_worker_02_dirt_orange", price = 200 },
+    { id = "work2", name = "Work clothes second", body = "SK_ma_construction_worker_01_c", price = 200 },
+    { id = "work2d", name = "Work clothes second", body = "SK_ma_construction_worker_01_c#MI_construction_worker_02_dirt_orange", price = 200 },
+    { id = "work3", name = "Work clothes third", body = "SK_ma_construction_worker_02_a", price = 200 },
+    { id = "work3d", name = "Work clothes third", body = "SK_ma_construction_worker_02_b", price = 200 },
+    { id = "shirt2", name = "Hoodie", body = "SK_ma_casual_02_b", price = 250 },
+    { id = "shirt2b", name = "Hoodie", body = "SK_ma_casual_02_b#MI_casual_02_blue", price = 250 },
+    { id = "shirt2r", name = "Hoodie", body = "SK_ma_casual_02_b#MI_casual_02_red", price = 250 },
+    { id = "shirt2g", name = "Hoodie", body = "SK_ma_casual_02_b#MI_casual_02_seedGuy", price = 250 },
+    { id = "shirt2c", name = "Hoodie", body = "SK_ma_casual_02_b#MI_casual_DeadDealer02", price = 250 },
+    { id = "shirt2p", name = "Hoodie", body = "SK_ma_casual_02_b#MI_casual_jay", price = 250 },
+    { id = "shirt3", name = "Hoodie, second cut", body = "SK_ma_casual_02_c", price = 250 },
+    { id = "shirt3b", name = "Hoodie, second cut", body = "SK_ma_casual_02_c#MI_casual_02_blue", price = 250 },
+    { id = "shirt3r", name = "Hoodie, second cut", body = "SK_ma_casual_02_c#MI_casual_02_red", price = 250 },
+    { id = "shirt3g", name = "Hoodie, second cut", body = "SK_ma_casual_02_c#MI_casual_02_seedGuy", price = 250 },
+    { id = "shirt3c", name = "Hoodie, second cut", body = "SK_ma_casual_02_c#MI_casual_DeadDealer02", price = 250 },
+    { id = "shirt3p", name = "Hoodie, second cut", body = "SK_ma_casual_02_c#MI_casual_jay", price = 250 },
+    { id = "waiter", shop = "formal", name = "Waiter", body = "SK_ma_waiter_01", price = 900 },
+    { id = "doctor", shop = "formal", name = "Doctor's coat", body = "SK_ma_physician_01", price = 1200 },
+    { id = "suit1", shop = "formal", name = "Suit", body = "SK_ma_business_01", price = 2000 },
+    { id = "suit2", shop = "formal", name = "Suit, second cut", body = "SK_ma_business_01_b", price = 2000 },
+    { id = "suit1c", shop = "formal", name = "Suit", body = "SK_ma_business_01#MI_ma_business_01_c", price = 2000 },
+    { id = "suit1d", shop = "formal", name = "Suit", body = "SK_ma_business_01#MI_ma_business_01_c_dark", price = 2000 },
+    { id = "suit1m", shop = "formal", name = "Suit", body = "SK_ma_business_01#MI_ma_business_01_moneyLaunderer", price = 2000 },
+    { id = "suit1k", shop = "formal", name = "Suit", body = "SK_ma_business_01#MI_ma_business_bodyguard", price = 2000 },
+    { id = "suit1p", shop = "formal", name = "Suit", body = "SK_ma_business_01#MI_donaldSuit", price = 2000 },
 }
 local FACES = { "SK_ma_head_01", "SK_ma_head_02", "SK_ma_head_04_dark", "SK_ma_head_05_asian", "SK_ma_head_05_basian" }
 local HAIR = {
@@ -49,9 +84,99 @@ local HAIR = {
     { name = "Hair 3", mesh = "Hats_Hair/SK_ma_hair_03" }, { name = "Hair 4", mesh = "Hats_Hair/SK_ma_hair_04" },
     { name = "Hair 5", mesh = "Hats_Hair/SK_ma_hair_05" }, { name = "Hair 6", mesh = "Hats_Hair/SK_ma_hair_06" },
     { name = "Cap", price = 300, mesh = "Hats_Hair/SK_ma_hat_cap_01" }, { name = "Cap, second", price = 300, mesh = "Hats_Hair/SK_ma_hat_cap_02" },
-    { name = "Beanie", price = 200, mesh = "Hats_Hair/SK_ma_hat_casual_set_beanie_01" }, { name = "Flat cap", price = 600, mesh = "Hats_Hair/SK_ma_hat_flatcap_01" },
-    { name = "Beret", price = 500, mesh = "Hats_Hair/SK_ma_hat_beret_01" }, { name = "Country hat", price = 1500, mesh = "Hats_Hair/SK_ma_hat_country_02" },
+    { name = "Beanie", price = 200, mesh = "Hats_Hair/SK_ma_hat_casual_set_beanie_01" }, { name = "Flat cap", price = 600, shop = "formal", mesh = "Hats_Hair/SK_ma_hat_flatcap_01" },
+    { name = "Beret", price = 500, shop = "formal", mesh = "Hats_Hair/SK_ma_hat_beret_01" }, { name = "Country hat", price = 1500, shop = "formal", mesh = "Hats_Hair/SK_ma_hat_country_02" },
     { name = "Bald", mesh = "" },
+    -- (added later: after Bald, so that what players own keeps its number)
+    { name = "Cap", price = 300, mesh = "Hats_Hair/SK_ma_hat_cap_01#MI_hat_cap_01_darkblue" },
+    { name = "Cap, second", price = 300, mesh = "Hats_Hair/SK_ma_hat_cap_02#MI_hat_cap_02_logo1" },
+    { name = "Army cap", price = 400, mesh = "Hats_Hair/SK_ma_hat_casual_set_army_cap_01" },
+    { name = "Army cap, second", price = 400, mesh = "Hats_Hair/SK_ma_hat_casual_set_army_cap_01_back_hair" },
+    { name = "Hard hat", price = 250, mesh = "Hats_Hair/SK_ma_hat_construction_worker_01" },
+    { name = "Ear defenders", price = 1200, mesh = "Hats_Hair/SK_ma_hat_headset_01" },
+}
+-- The female catalogue. Every one of these outfits comes with shoes and needs no body under
+-- it (coop/avatar.lua builds a female figure on the male skeleton, so every animation of the
+-- mod plays on it). Colours as for the men's.
+local F_OUTFITS = {
+    { id = "f_sweater", starter = true, name = "Sweater, jeans", body = "SK_fe_casual_02_a", price = 400 },
+    { id = "f_sweater_g", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_01_dark", price = 400 },
+    { id = "f_sweater_o", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_01_yellow", price = 400 },
+    { id = "f_sweater_s", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_03", price = 400 },
+    { id = "f_jumper", starter = true, name = "Jumper, jeans", body = "SK_fe_casual_02_b", price = 300 },
+    { id = "f_jumper_g", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_01_dark", price = 300 },
+    { id = "f_jumper_o", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_01_yellow", price = 300 },
+    { id = "f_jumper_s", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_03", price = 300 },
+    { id = "f_stripes", starter = true, name = "Striped top", body = "SK_fe_casual_02_c", price = 250 },
+    { id = "f_stripes_b", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01", price = 250 },
+    { id = "f_stripes_g", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01_dark", price = 250 },
+    { id = "f_stripes_o", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01_yellow", price = 250 },
+    { id = "f_crop", starter = true, name = "Crop top", body = "SK_fe_casual_02_d", price = 200 },
+    { id = "f_crop_g", name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_01_dark", price = 200 },
+    { id = "f_crop_o", name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_01_yellow", price = 200 },
+    { id = "f_skirt", name = "Sweater, skirt", body = "SK_fe_clerk_01", price = 200 },
+    { id = "f_skirt_b", name = "Sweater, skirt", body = "SK_fe_clerk_01#MI_fe_casual_01", price = 200 },
+    { id = "f_skirt_g", name = "Sweater, skirt", body = "SK_fe_clerk_01#MI_fe_casual_01_dark", price = 200 },
+    { id = "f_jog", name = "Jogging set", body = "SK_fe_sport_01", price = 600 },
+    { id = "f_hoodie", name = "Hoodie, sweatpants", body = "SK_fe_sport_02_b", price = 200 },
+    { id = "f_hoodie_b", name = "Hoodie, sweatpants", body = "SK_fe_sport_02_b#MI_fe_sport_02_blue", price = 200 },
+    { id = "f_hoodie_o", name = "Hoodie, sweatpants", body = "SK_fe_sport_02_b#MI_fe_sport_02_orange", price = 200 },
+    { id = "f_suit", shop = "formal", name = "Suit", body = "SK_fe_business_01_c", price = 1800 },
+    { id = "f_suit_w", shop = "formal", name = "Suit", body = "SK_fe_business_01_c#MI_fe_business_01", price = 1800 },
+    { id = "f_suit_b", shop = "formal", name = "Suit", body = "SK_fe_business_01_c#MI_fe_business_01_blue", price = 1800 },
+    { id = "f_suit_p", shop = "formal", name = "Suit", body = "SK_fe_business_01_c#MI_fe_business_01_SicarioWife", price = 1800 },
+    { id = "f_suit_r", shop = "formal", name = "Suit", body = "SK_fe_business_01_c#MI_fe_business_01_b_red", price = 1800 },
+    { id = "f_tights", shop = "formal", name = "Suit, tights", body = "SK_fe_business_01_b", price = 1800 },
+    { id = "f_tights_d", shop = "formal", name = "Suit, tights", body = "SK_fe_business_01_b#MI_fe_business_01_d", price = 1800 },
+    { id = "f_tights_b", shop = "formal", name = "Suit, tights", body = "SK_fe_business_01_b#MI_fe_business_01_blue", price = 1800 },
+    { id = "f_tights_p", shop = "formal", name = "Suit, tights", body = "SK_fe_business_01_b#MI_fe_business_01_SicarioWife", price = 1800 },
+    { id = "f_tights_r", shop = "formal", name = "Suit, tights", body = "SK_fe_business_01_b#MI_fe_business_01_b_red", price = 1800 },
+    { id = "f_tshirt", name = "T-shirt, sweatpants", body = "SK_fe_sport_02_a", price = 200 },
+    { id = "f_tshirt_o", name = "T-shirt, sweatpants", body = "SK_fe_sport_02_a#MI_fe_sport_02_orange", price = 200 },
+    { id = "f_tsuit", shop = "formal", name = "Trouser suit", body = "SK_fe_business_01_a", price = 2200 },
+    { id = "f_tsuit_d", shop = "formal", name = "Trouser suit", body = "SK_fe_business_01_a#MI_fe_business_01_d", price = 2200 },
+    { id = "f_tsuit_w", shop = "formal", name = "Trouser suit", body = "SK_fe_business_01_a#MI_fe_business_01", price = 2200 },
+    { id = "f_tsuit_p", shop = "formal", name = "Trouser suit", body = "SK_fe_business_01_a#MI_fe_business_01_SicarioWife", price = 2200 },
+    { id = "f_tsuit_r", shop = "formal", name = "Trouser suit", body = "SK_fe_business_01_a#MI_fe_business_01_b_red", price = 2200 },
+}
+local F_FACES = { "SK_fe_head_01", "SK_fe_head_01_dark", "SK_fe_head_02_asian", "SK_fe_head_02_b", "SK_fe_head_03", "SK_fe_head_05" }
+local F_HAIR = {
+    { name = "Bald", mesh = "" },
+    { name = "Hair 1", mesh = "Hats_Hair/SK_fe_hair_01" }, { name = "Hair 2", mesh = "Hats_Hair/SK_fe_hair_02" },
+    { name = "Hair 3", mesh = "Hats_Hair/SK_fe_hair_03" }, { name = "Hair 4", mesh = "Hats_Hair/SK_fe_hair_04" },
+    { name = "Hair 5", mesh = "Hats_Hair/SK_fe_hair_05" },
+    { name = "Cap", price = 300, mesh = "Hats_Hair/SK_fe_hat_cap_01" }, { name = "Cap", price = 300, mesh = "Hats_Hair/SK_fe_hat_cap_01#MI_hat_cap_01_darkblue" },
+    { name = "Army cap", price = 400, mesh = "Hats_Hair/SK_fe_hat_casual_set_army_cap_01" },
+    { name = "Beanie", price = 200, mesh = "Hats_Hair/SK_fe_hat_casual_set_beanie_01_hair" }, { name = "Beanie, second", price = 200, mesh = "Hats_Hair/SK_fe_hat_casual_set_beanie_02" },
+    { name = "Beret", price = 500, shop = "formal", mesh = "Hats_Hair/SK_fe_hat_beret_01_a" }, { name = "Beret, second", price = 500, shop = "formal", mesh = "Hats_Hair/SK_fe_hat_beret_01_b" },
+}
+-- Glasses, bought at Marco's and worn with any hair or hat. None to begin with.
+local M_GLASSES = {
+    { name = "Wire glasses", mesh = "SK_ma_glass_01", price = 150, shop = "formal" }, { name = "Round glasses", mesh = "SK_ma_glass_02", price = 150, shop = "formal" },
+    { name = "Black frames", mesh = "SK_ma_glass_04", price = 200, shop = "formal" }, { name = "Rectangle glasses", mesh = "SK_ma_glass_05", price = 200, shop = "formal" },
+    { name = "Sports sunglasses", mesh = "SK_ma_glass_03", price = 2000 },
+}
+-- Men's hats are worn over the hair (where hair sticks through, Bald is free). Every
+-- women's hat takes the hair off: none of their hairstyles fits under one.
+Avatar.hidesHair = function(hatMesh)
+    local name = (tostring(hatMesh or ""):gsub("#.*$", "")):match("[^/]+$") or ""
+    return name:sub(1, 10) == "SK_fe_hat_"
+end
+
+-- Beards (men): chosen on the "who are you" screen, worn with any hair, hat or glasses.
+local BEARDS = {
+    { name = "Beard 1", mesh = "Hats_Hair/SK_ma_beard_single_01" }, { name = "Beard 2", mesh = "Hats_Hair/SK_ma_beard_single_02" },
+}
+local F_GLASSES = {
+    { name = "Rimless glasses", mesh = "SK_fe_glass_01_generic", price = 150, shop = "formal" }, { name = "Rectangle glasses", mesh = "SK_fe_glass_05", price = 150, shop = "formal" },
+    { name = "Sports glasses", mesh = "SK_fe_glass_02_scientist", price = 1500 }, { name = "Thick frames", mesh = "SK_fe_glass_03", price = 1500 },
+    { name = "Thin frames", mesh = "SK_fe_glass_04", price = 200, shop = "formal" },
+}
+-- Each gender's lists. A player's choices for the other one are kept for when they switch
+-- back on the "who are you" screen. Hats owned are kept by index, the women's with "f".
+local SETS = {
+    m = { outfits = OUTFITS, faces = FACES, hair = HAIR, glasses = M_GLASSES, default = "jacket", hairKey = "" },
+    f = { outfits = F_OUTFITS, faces = F_FACES, hair = F_HAIR, glasses = F_GLASSES, default = "f_sweater", hairKey = "f" },
 }
 -- Every number of every kind of character is in this list. stamina and speed multiply the
 -- character's base values; seen multiplies how visible the player is to police (lower is
@@ -79,16 +204,68 @@ local CHARACTER_CHANGE_PRICE = 300
 -- Donald's furniture shop at the Old Market (where the game's own shop actor stands).
 local SHOP = { x = -1495, y = -12945, z = 110, reach = 600 }
 
-local byId, bodyAllowed, faceAllowed, hairAllowed = {}, {}, {}, { [""] = true }
-for _, o in ipairs(OUTFITS) do byId[o.id] = o; bodyAllowed[o.body] = true end
-for _, f in ipairs(FACES) do faceAllowed[f] = true end
-for _, h in ipairs(HAIR) do hairAllowed[h.mesh] = true end
+local byId, bodyAllowed, faceAllowed, hairAllowed, glassesAllowed = {}, {}, {}, { [""] = true }, { [""] = true }
+local beardAllowed = { [""] = true }
+for _, b in ipairs(BEARDS) do beardAllowed[b.mesh] = true end
+local genderOf = {}
+for g, set in pairs(SETS) do
+    for _, o in ipairs(set.outfits) do byId[o.id] = o; bodyAllowed[o.body] = true; genderOf[o.id] = g end
+    for _, f in ipairs(set.faces) do faceAllowed[f] = true end
+    for _, h in ipairs(set.hair) do hairAllowed[h.mesh] = true end
+    for _, g in ipairs(set.glasses) do glassesAllowed[g.mesh] = true end
+end
 local characterById = {}
 for _, c in ipairs(CHARACTERS) do characterById[c.id] = c end
 
-local state = { outfit = "jacket", face = 1, hair = 1, character = "hustler", owned = { jacket = true }, ownedHair = {}, characterPicked = false, roster = ROSTER }
+local state = { gender = "m", other = {}, outfit = "jacket", face = 1, hair = 1, hat = 0, glasses = 0, beard = 0, character = "hustler", owned = { jacket = true }, ownedHair = {}, ownedGlasses = {}, characterPicked = false, roster = ROSTER }
+
+---------------------------------------------------------------- what is owned, per save
+
+-- What the player owns (outfits, hats, glasses) belongs to the save, like the "who are you"
+-- choice (coop/guests.lua: the host's own and single player beside the save, a guest's in
+-- the host's world). It is written when the game saves, so a purchase in a game that is
+-- not saved is gone with it, like the money paid for it. The lists in state are this
+-- world's; they are set when a world is there (applyOwned) and sent on with every purchase.
+local function copyTrue(t)
+    local out = {}
+    for k, v in pairs(type(t) == "table" and t or {}) do if v == true then out[tostring(k)] = true end end
+    return out
+end
 local loaded = false
 local applyingTraits = false
+
+local function S() return SETS[state.gender] or SETS.m end
+-- the first hairstyle with hair (Bald comes first in the women's list)
+local function firstHair()
+    for i, h in ipairs(S().hair) do if not h.price and h.mesh ~= "" then return i end end
+    return 1
+end
+-- the key a hat of the current gender's list is kept under
+local function hk(i) return S().hairKey .. tostring(i) end
+-- the same for glasses ("g3", "fg3")
+local function gk(i) return S().hairKey .. "g" .. tostring(i) end
+local function glassesOf(key)
+    local f, n = tostring(key):match("^(f?)g(%d+)$")
+    if not n then return nil end
+    return (f == "f" and F_GLASSES or M_GLASSES)[tonumber(n)]
+end
+local function hatMesh()
+    local h = (state.hat or 0) > 0 and S().hair[state.hat] or nil
+    return h and h.price and h.mesh or ""
+end
+local function beardMesh()
+    local b = state.gender == "m" and BEARDS[state.beard or 0] or nil
+    return b and b.mesh or ""
+end
+local function glassesMesh()
+    local g = S().glasses[state.glasses or 0]
+    return g and g.mesh or ""
+end
+local function hatOf(key)
+    local f, n = tostring(key):match("^(f?)(%d+)$")
+    if not n then return nil end
+    return (f == "f" and F_HAIR or HAIR)[tonumber(n)]
+end
 
 ---------------------------------------------------------------- the player's file
 
@@ -107,9 +284,19 @@ local function load()
     f:close()
     local ok, data = pcall(json.decode, text)
     if not ok or type(data) ~= "table" then return end
-    if byId[data.outfit] then state.outfit = data.outfit end
-    if FACES[tonumber(data.face) or 0] then state.face = tonumber(data.face) end
-    if HAIR[tonumber(data.hair) or 0] then state.hair = tonumber(data.hair) end
+    if SETS[data.gender] then state.gender = data.gender end
+    if type(data.other) == "table" then state.other = data.other end
+    if byId[data.outfit] and genderOf[data.outfit] == state.gender then state.outfit = data.outfit else state.outfit = S().default end
+    if S().faces[tonumber(data.face) or 0] then state.face = tonumber(data.face) end
+    if S().hair[tonumber(data.hair) or 0] then state.hair = tonumber(data.hair) end
+    if type(data.ownedGlasses) == "table" then
+        for id, v in pairs(data.ownedGlasses) do
+            if glassesOf(id) and v == true then state.ownedGlasses[tostring(id)] = true end
+        end
+    end
+    if BEARDS[tonumber(data.beard) or 0] then state.beard = tonumber(data.beard) end
+    local g = tonumber(data.glasses) or 0
+    if S().glasses[g] and state.ownedGlasses[gk(g)] then state.glasses = g else state.glasses = 0 end
     local kind = FORMER[data.character] or data.character
     if characterById[kind] then state.character = kind end
     state.characterPicked = data.characterPicked == true
@@ -127,10 +314,23 @@ local function load()
     state.owned[state.outfit] = true
     if type(data.ownedHair) == "table" then
         for id, v in pairs(data.ownedHair) do
-            if HAIR[tonumber(id) or 0] and v == true then state.ownedHair[tostring(id)] = true end
+            if hatOf(id) and v == true then state.ownedHair[tostring(id)] = true end
         end
     end
-    if HAIR[state.hair].price then state.ownedHair[tostring(state.hair)] = true end
+    if S().hair[state.hair].price then
+        state.ownedHair[hk(state.hair)] = true
+        state.hat, state.hair = state.hair, firstHair()
+    end
+    local hat = tonumber(data.hat) or 0
+    if hat > 0 and S().hair[hat] and S().hair[hat].price and state.ownedHair[hk(hat)] then state.hat = hat end
+    if not S().hair[state.hat or 0] or not S().hair[state.hat].price then state.hat = 0 end
+    -- What was bought before purchases went with the saves (this file kept them for every
+    -- save at once): kept as it was then, for saves that do not say what they own yet.
+    if type(data.legacy) == "table" then
+        state.legacy = data.legacy
+    else
+        state.legacy = { owned = state.owned, hair = state.ownedHair, glasses = state.ownedGlasses }
+    end
 end
 
 local function save()
@@ -145,16 +345,49 @@ local function save()
     f:close()
 end
 
+-- The character is chosen anew on the next join (a guest who starts over in a world).
+-- The lists of this world: the save's, or (a save of before) what was owned then; a new
+-- game starts with nothing bought. What is worn and not owned is taken off.
+local function applyOwned(record)
+    local src = nil
+    if type(record) == "table" and type(record.owned) == "table" then
+        src = record
+    elseif not Guests.newGame() then
+        src = state.legacy
+    end
+    src = type(src) == "table" and src or {}
+    state.owned, state.ownedHair, state.ownedGlasses = {}, {}, {}
+    for id in pairs(copyTrue(src.owned)) do if byId[id] then state.owned[id] = true end end
+    for id in pairs(copyTrue(src.hair)) do if hatOf(id) then state.ownedHair[id] = true end end
+    for id in pairs(copyTrue(src.glasses)) do if glassesOf(id) then state.ownedGlasses[id] = true end end
+    if not (byId[state.outfit] and byId[state.outfit].starter) and not state.owned[state.outfit] then state.outfit = S().default end
+    if (state.hat or 0) > 0 and not state.ownedHair[hk(state.hat)] then state.hat = 0 end
+    if (state.glasses or 0) > 0 and not state.ownedGlasses[gk(state.glasses)] then state.glasses = 0 end
+end
+
+-- The choice and what is owned, to go with the save (and, for a guest, to the host).
+local function syncSelf()
+    Guests.setSelf({ character = state.character, owned = copyTrue(state.owned), hair = copyTrue(state.ownedHair), glasses = copyTrue(state.ownedGlasses) })
+end
+
+function Look.startOver()
+    load()
+    state.characterPicked = false
+    save()
+end
+
 ---------------------------------------------------------------- how the others see us
 
 function Look.current()
     load()
-    return { body = byId[state.outfit].body, head = FACES[state.face], hair = HAIR[state.hair].mesh, arms = true }
+    local hat = hatMesh()
+    local hair = S().hair[state.hair] and not S().hair[state.hair].price and S().hair[state.hair].mesh or ""
+    return { body = byId[state.outfit].body, head = S().faces[state.face], hair = hair, hat = hat, glasses = glassesMesh(), beard = beardMesh(), arms = true }
 end
 
 local function describe(owner)
     local l = Look.current()
-    return { b = l.body, h = l.head, r = l.hair, p = owner }
+    return { b = l.body, h = l.head, r = l.hair, c = l.hat, g = l.glasses, w = l.beard, p = owner }
 end
 
 -- Tells the other players in the world how we look.
@@ -176,13 +409,14 @@ Net.on("look", function(sender, data)
     local who = sender
     if World.role == "guest" and data.p ~= nil then who = data.p end
     if who == Net.S.me then return end
-    local body, head, hair = tostring(data.b), tostring(data.h), tostring(data.r or "")
-    if not bodyAllowed[body] or not faceAllowed[head] or not hairAllowed[hair] then return end
-    Avatar.setLook(who, { body = "" .. body, head = head, hair = hair, arms = true })
+    local body, head, hair, glasses = tostring(data.b), tostring(data.h), tostring(data.r or ""), tostring(data.g or "")
+    local beard, hat = tostring(data.w or ""), tostring(data.c or "")
+    if not bodyAllowed[body] or not faceAllowed[head] or not hairAllowed[hair] or not glassesAllowed[glasses] or not beardAllowed[beard] or not hairAllowed[hat] then return end
+    Avatar.setLook(who, { body = "" .. body, head = head, hair = hair, hat = hat, glasses = glasses, beard = beard, arms = true })
     vlog("Look: %s wears %s", Net.name(who), body)
     if World.role == "host" then
         for id in pairs(World.inWorld) do
-            if id ~= sender then Net.send("look", { b = body, h = head, r = hair, p = sender }, id) end
+            if id ~= sender then Net.send("look", { b = body, h = head, r = hair, c = hat, g = glasses, w = beard, p = sender }, id) end
         end
     end
 end)
@@ -281,8 +515,31 @@ local function pay(price)
     return true
 end
 
--- In the clothes corner (the screen closes when the player is moved out of it).
-function Look.atShop() return Clerk.distance() < 520 end
+-- The clothes shops: Marco's corner at Donald's (coop/clerk.lua) and the formal store
+-- (coop/boutique.lua, when it is there). Each has a shopkeeper to talk to, a place the
+-- player looks on from (VIEWPOINT) and a place the figure dressed like them stands (FITTING).
+local boutiqueModule = false
+local function boutique()
+    if boutiqueModule == false then
+        local ok, b = pcall(require, "coop.boutique")
+        boutiqueModule = ok and type(b) == "table" and b or nil
+        if boutiqueModule then
+            boutiqueModule.wanted = function() return World.extras() end
+            boutiqueModule.onShow = function() Look.openShop(boutiqueModule) end
+        end
+    end
+    return boutiqueModule
+end
+local function storeNear()
+    if Clerk.near() then return Clerk end
+    local b = boutique()
+    if b and b.near() then return b end
+    return nil
+end
+Look.store = Clerk
+
+-- In the shop whose screen is (to be) open.
+function Look.atShop(store) return (store or Look.store or Clerk).distance() < 520 end
 
 -- Where the figure stands while the shop screen is open.
 Look.fitting = Clerk.FITTING
@@ -317,8 +574,8 @@ local function view()
 end
 
 -- Next to the clothes shopkeeper.
-function Look.atClerk() return Clerk.near() end
-Clerk.wanted = function() return World.active or Net.isHost() end
+function Look.atClerk() return storeNear() ~= nil end
+Clerk.wanted = function() return World.extras() end
 
 -- A marker on the map, like the game's own shop markers.
 local shopMarker = nil
@@ -331,13 +588,25 @@ end
 -- The game is first-person, so both screens show the player as a figure dressed like them,
 -- standing to the right of the panel and turning slowly.
 local mirror, mirrorKey, mirrorAt = nil, nil, nil
-local preview = nil      -- something being tried on in the shop: { body = mesh } or { hair = mesh }
+-- what is being tried on in the shop, any of { body, hair, glasses } at once (nil: nothing)
+local preview = nil
+local function tryOn(slot, value)
+    preview = preview or {}
+    preview[slot] = value
+end
+local function takeOff(slot)
+    if not preview then return end
+    preview[slot] = nil
+    if next(preview) == nil then preview = nil end
+end
 
 local function shownLook()
     local l = Look.current()
     if preview then
         if preview.body then l.body = preview.body end
         if preview.hair ~= nil then l.hair = preview.hair end
+        if preview.hat ~= nil then l.hat = preview.hat end
+        if preview.glasses ~= nil then l.glasses = preview.glasses end
     end
     return l
 end
@@ -396,17 +665,18 @@ local function showMirror()
     local player = World.player()
     if not player then return end
     local l = shownLook()
-    local key = l.body .. "|" .. l.head .. "|" .. l.hair
+    local key = l.body .. "|" .. l.head .. "|" .. l.hair .. "|" .. tostring(l.hat) .. "|" .. tostring(l.glasses) .. "|" .. tostring(l.beard)
     local loc = player:K2_GetActorLocation()
     local yaw = player:K2_GetActorRotation().Yaw
     pcall(function() yaw = player:GetControlRotation().Yaw end)
     local r = math.rad(yaw)
     local x, y, facing, size
-    local spot = Look.page == "shop" and Look.fitting or nil
+    local spot = (Look.page == "shop" or Look.page == "wardrobe") and Look.fitting or nil
     if spot then
         -- In the shop the figure stands full size on the floor in front of the rack, like
-        -- somebody trying the clothes on; the player has been turned to it.
-        x, y, loc.Z, size = spot.x, spot.y, spot.z, 1
+        -- somebody trying the clothes on; the player has been turned to it. (At the wardrobe
+        -- the same; where the room is small nearer and as much smaller: Look.openWardrobe.)
+        x, y, loc.Z, size = spot.x, spot.y, spot.z, spot.size or 1
         facing = math.deg(math.atan(loc.Y - y, loc.X - x))
     else
         -- Half size and close by (a wall or a lamp post further off cannot hide it), in
@@ -417,13 +687,14 @@ local function showMirror()
         if ok and e then eye, tx, ty = e, a, b end
         local F = 125
         local right = (2 * FIGURE_X - 1) * tx * F
-        local up = (1 - 2 * 0.475) * ty * F
+        -- (on the "who are you" screen a little lower: the MALE | FEMALE switch is above it)
+        local up = (1 - 2 * (Look.page == "start" and 0.57 or 0.475)) * ty * F
         -- (the camera is a little in front of where the player stands)
         x = eye.X + math.cos(r) * (F + CAMERA_FORWARD) - math.sin(r) * right
         y = eye.Y + math.sin(r) * (F + CAMERA_FORWARD) + math.cos(r) * right
         facing = math.deg(math.atan(eye.Y - y, eye.X - x))
-        size = 0.5
-        loc.Z = (ok and e) and (eye.Z + up + 45) or (loc.Z + 100)       -- a half-size figure's middle is 45 below this
+        size = 0.5 * F / 125
+        loc.Z = (ok and e) and (eye.Z + up + 45 * F / 125) or (loc.Z + 100)       -- a half-size figure's middle is 45 below this
     end
     local since = mirrorAt and mirrorAt.since or os.clock()
     if mirror and mirrorKey == key and valid(mirror.body) then
@@ -435,19 +706,13 @@ local function showMirror()
     if mirror then pcall(function() mirror.body:SetActorScale3D({ X = size, Y = size, Z = size }) end) end
     mirrorKey = key
     mirrorAt = { x = x, y = y, z = loc.Z, facing = facing, since = since }
-    -- A lamp of its own, so that it can be seen at night and indoors.
+    -- Light of its own from above and a little in front, so that it can be seen at night
+    -- and in dark rooms. It reaches the figure only (Avatar.lightFromAbove): the room stays
+    -- as it is. (All of it is in this game only, like the figure.)
     if mirror then
-        pcall(function()
-            local lamp = player:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.PointLight"),
-                { X = loc.X + (x - loc.X) * 0.35, Y = loc.Y + (y - loc.Y) * 0.35, Z = loc.Z - 30 }, { Pitch = 0, Yaw = 0, Roll = 0 })
-            mirror.actors[#mirror.actors + 1] = lamp
-            local c = lamp.LightComponent
-            c:SetMobility(2)
-            c:SetIntensity(700)
-            c:SetAttenuationRadius(240)
-            c:SetLightColor({ R = 1, G = 0.93, B = 0.82, A = 1 }, true)
-            c:SetCastShadows(false)
-        end)
+        local toX, toY = loc.X - x, loc.Y - y
+        local n = math.max(1, math.sqrt(toX * toX + toY * toY))
+        pcall(Avatar.lightFromAbove, mirror, x + toX / n * 70 * size, y + toY / n * 70 * size, loc.Z + 150 * size, 420 * size, 6000)
     end
 end
 
@@ -458,6 +723,10 @@ local function key(name) return tostring(Core.config[name] or "?") end
 local PANEL = { R = 0.006, G = 0.006, B = 0.006, A = 0.95 }
 local BAR_COLOR = { R = 0, G = 0, B = 0, A = 1 }
 local CARD = { R = 0.0, G = 0.0, B = 0.0, A = 1 }
+local SWITCH_ON = { R = 0.36, G = 0.78, B = 0.45, A = 1 }
+local SWITCH_OFF = { R = 0.03, G = 0.03, B = 0.03, A = 1 }
+local SWITCH_TEXT_ON = { R = 0.0, G = 0.0, B = 0.0, A = 1 }
+local SWITCH_EDGE = { R = 0.25, G = 0.25, B = 0.25, A = 1 }
 local FRAME_ON = { R = 0.10, G = 0.62, B = 0.18, A = 1 }
 
 local scr = nil          -- the open screen
@@ -481,9 +750,16 @@ end
 local function release()
     local p = pose
     pose = nil
+    if Look.store and Look.store.solid then pcall(Look.store.solid, true) end
     local player = World.player()
     if p and player and player:GetAddress() == p.owner then
         pcall(function() player.HUD:SetVisibility(p.hud or 4) end)
+    end
+    if p and p.lowered and player and player:GetAddress() == p.owner then
+        pcall(function()
+            player:SetActorEnableCollision(true)
+            player.CharacterMovement:SetMovementMode(1, 0)
+        end)
     end
     if p and p.back and player and player:GetAddress() == p.owner then
         pcall(function() player:K2_SetActorLocation({ X = p.back.x, Y = p.back.y, Z = p.back.z }, false, {}, true) end)
@@ -545,6 +821,7 @@ local function frame(title)
         release()
     end
     scr.area(scr.box(PANEL), 0, 0, PANEL_W, 1)
+    scr.quickLeft = PANEL_W            -- short messages: right of the panel (coop/hud.lua)
     scr.area(scr.box(BAR_COLOR), 0, 0, 1, 0.1)
     scr.place(scr.text(title, "name", 26), LEFT, 0.05, 0, 0, 0, 0.5)
     return true
@@ -553,7 +830,9 @@ end
 -- One card of a grid, top to bottom: a picture, a price or note (right), a name, lines of
 -- small text (a string, or { text, colour }), one or two buttons ({ label, onClick,
 -- disabled, colour } each). Any part may be left out.
-local function tile(w, h, name, lines, corner, cornerColor, buttons, on, picture, pictureGap)
+-- `onClick`: what a click anywhere else on the card does (the card's buttons stay theirs).
+local SELF_HIT_INVISIBLE, HIT_INVISIBLE = 4, 3
+local function tile(w, h, name, lines, corner, cornerColor, buttons, on, picture, pictureGap, onClick, clickLabel)
     local column = scr.new("VerticalBox")
     local function row(widget, top, align, bottom)
         local slot = column:AddChildToVerticalBox(widget)
@@ -562,7 +841,10 @@ local function tile(w, h, name, lines, corner, cornerColor, buttons, on, picture
         return slot
     end
     if corner then row(scr.text(corner, "price", 16, cornerColor or Screen.GREEN), 0, 3) end
-    if picture then row(picture, pictureGap or 0, 2, pictureGap or 0) end
+    if picture then
+        pcall(function() picture:SetVisibility(HIT_INVISIBLE) end)
+        row(picture, pictureGap or 0, 2, pictureGap or 0)
+    end
     if name then row(scr.text(name, "name", 15), 8) end
     for _, line in ipairs(lines or {}) do
         if type(line) == "table" then
@@ -584,7 +866,18 @@ local function tile(w, h, name, lines, corner, cornerColor, buttons, on, picture
     face:SetPadding({ Left = 8, Top = 6, Right = 8, Bottom = 8 })
     -- The one in use has a green frame. The others have the same frame in the card's own
     -- colour, so that every card is laid out alike and the pictures (black) sit on black.
-    return scr.sized(scr.box(on and FRAME_ON or CARD, face, 2), w, h)
+    local card = scr.sized(scr.box(on and FRAME_ON or CARD, face, 2), w, h)
+    if not onClick then return card end
+    -- what is drawn lets clicks through to the invisible button underneath, except the
+    -- card's own buttons
+    for _, wd in ipairs({ column, line, face, card, card:GetChildAt(0) }) do
+        pcall(function() wd:SetVisibility(SELF_HIT_INVISIBLE) end)
+    end
+    local hit = scr.hit(clickLabel or name or "card", onClick)
+    local stack = scr.new("Overlay")
+    stack:AddChildToOverlay(scr.sized(hit.widget, w, h))
+    stack:AddChildToOverlay(card)
+    return stack
 end
 
 local function texture(path)
@@ -678,62 +971,152 @@ renderStart = function()
     row(#CHARACTERS, 208, function(i, w, h)
         local c = CHARACTERS[i]
         local on = c.id == state.character
-        return tile(w, h, c.name:upper(), traitLines(c), nil, nil, { { on and "SELECTED" or "SELECT", function()
+        local pick = function()
             state.character = c.id
             renderStart()
-        end, false, on and Screen.GREEN or nil } }, on, icon(c.id, 50), 2)
+        end
+        return tile(w, h, c.name:upper(), traitLines(c), nil, nil, { { on and "SELECTED" or "SELECT", pick, false, on and Screen.GREEN or nil } },
+            on, icon(c.id, 50), 2, pick, c.id)
     end)
 
     local starters = {}
-    for _, o in ipairs(OUTFITS) do if o.starter then starters[#starters + 1] = o end end
+    for _, o in ipairs(S().outfits) do if o.starter then starters[#starters + 1] = o end end
     heading("OUTFIT", 24)
     row(#starters, 232, function(i, w, h)
         local o = starters[i]
         local on = o.id == state.outfit
         local pic = Thumbs.image(scr, "b|" .. o.body .. "|" .. look.head, { look = { body = o.body, head = look.head, hair = look.hair, arms = true }, shot = "body" }, 100, 150)
-        return tile(w, h, o.name, nil, nil, nil, { { on and "WEARING" or "WEAR", function()
+        local pick = function()
             state.outfit = o.id
             renderStart()
-        end, false, on and Screen.GREEN or nil } }, on, pic)
+        end
+        return tile(w, h, o.name, nil, nil, nil, { { on and "WEARING" or "WEAR", pick, false, on and Screen.GREEN or nil } }, on, pic, nil, pick, o.id)
     end)
 
-    heading("FACE", 24)
-    row(#FACES, 140, function(i, w, h)
+    local faces = S().faces
+    local men = state.gender == "m"
+    if men then
+        -- FACE over the faces, BEARD over the two beards: cards as wide as the hair cards
+        local count = #faces + #BEARDS
+        local cw = math.floor((width - (count - 1) * GAP) / count)
+        local line = scr.new("HorizontalBox")
+        line:AddChildToHorizontalBox(scr.sized(scr.text("FACE", "button", 16, Screen.GREY), #faces * (cw + GAP), nil))
+        line:AddChildToHorizontalBox(scr.text("BEARD", "button", 16, Screen.GREY))
+        local slot = panel:AddChildToVerticalBox(line)
+        slot:SetPadding({ Left = 0, Top = 24, Right = 0, Bottom = 8 })
+        row(count, 140, function(i, w, h)
+            if i > #faces then
+                local n = i - #faces
+                local b = BEARDS[n]
+                local on = state.beard == n
+                local pic = Thumbs.image(scr, "w|" .. b.mesh .. "|" .. look.head .. "|" .. look.hair, { look = { body = look.body, head = look.head, hair = look.hair, beard = b.mesh, arms = true }, shot = "face" }, 84, 84)
+                local pick = function()
+                    state.beard = on and 0 or n       -- the chosen one again: no beard
+                    renderStart()
+                end
+                return tile(w, h, nil, nil, nil, nil, { { b.name:upper(), pick, false, on and Screen.GREEN or nil } }, on, pic, nil, pick, "beard" .. n)
+            end
+            local on = i == state.face
+            local pic = Thumbs.image(scr, "f|" .. faces[i] .. "|" .. look.hair, { look = { body = look.body, head = faces[i], hair = look.hair, arms = true }, shot = "face" }, 84, 84)
+            local pick = function()
+                state.face = i
+                renderStart()
+            end
+            return tile(w, h, nil, nil, nil, nil, { { "FACE " .. i, pick, false, on and Screen.GREEN or nil } }, on, pic, nil, pick, "face" .. i)
+        end)
+    end
+    if not men then heading("FACE", 24) end
+    if not men then row(#faces, 140, function(i, w, h)
         local on = i == state.face
-        local pic = Thumbs.image(scr, "f|" .. FACES[i] .. "|" .. look.hair, { look = { body = look.body, head = FACES[i], hair = look.hair, arms = true }, shot = "face" }, 84, 84)
-        return tile(w, h, nil, nil, nil, nil, { { "FACE " .. i, function()
+        local pic = Thumbs.image(scr, "f|" .. faces[i] .. "|" .. look.hair, { look = { body = look.body, head = faces[i], hair = look.hair, arms = true }, shot = "face" }, 84, 84)
+        local pick = function()
             state.face = i
             renderStart()
-        end, false, on and Screen.GREEN or nil } }, on, pic)
-    end)
+        end
+        return tile(w, h, nil, nil, nil, nil, { { "FACE " .. i, pick, false, on and Screen.GREEN or nil } }, on, pic, nil, pick, "face" .. i)
+    end) end
 
     local free = {}
-    for i, h in ipairs(HAIR) do if not h.price then free[#free + 1] = i end end
+    local hairs = S().hair
+    for i, h in ipairs(hairs) do if not h.price and h.mesh == "" then free[#free + 1] = i end end
+    for i, h in ipairs(hairs) do if not h.price and h.mesh ~= "" then free[#free + 1] = i end end
     heading("HAIR", 24)
     row(#free, 140, function(n, w, h)
         local i = free[n]
-        local hair = HAIR[i]
+        local hair = hairs[i]
         local on = i == state.hair
         local pic = Thumbs.image(scr, "h|" .. hair.mesh .. "|" .. look.head, { look = { body = look.body, head = look.head, hair = hair.mesh, arms = true }, shot = "hair" }, 84, 84)
-        return tile(w, h, nil, nil, nil, nil, { { hair.name:upper(), function()
+        local pick = function()
             state.hair = i
             renderStart()
-        end, false, on and Screen.GREEN or nil } }, on, pic)
+        end
+        return tile(w, h, nil, nil, nil, nil, { { hair.name:upper(), pick, false, on and Screen.GREEN or nil } }, on, pic, nil, pick, "hair" .. i)
     end)
     put(panel, LEFT, 0.1, 0, 24, 0, 0)
 
     local start = scr.bigButton("START AS " .. character().name:upper(), 1.7, function()
         state.characterPicked = true
         state.roster = ROSTER
+        -- the choice belongs to this save (a guest: to this player in the host's world)
+        syncSelf()
         state.owned[state.outfit] = true
         save()
         Look.applyTraits()
         Look.announce()
-        Hud.toast("You are " .. character().name, 4)
         closeScreen()
+        Hud.toast("You are " .. character().name, 4)
     end)
     put(start.box, FIGURE_X, 0.9)
+
+    -- MALE | FEMALE above the figure: the selected half green
+    local switch = scr.new("HorizontalBox")
+    local SW, SH = 160, 44
+    for n, def in ipairs({ { "m", "MALE" }, { "f", "FEMALE" } }) do
+        local on = state.gender == def[1]
+        local words = scr.text(def[2], "button", 18, on and SWITCH_TEXT_ON or Screen.WHITE)
+        local inner = scr.new("SizeBox")
+        inner:SetWidthOverride(SW)
+        inner:SetHeightOverride(SH)
+        local slot = inner:AddChild(words)
+        pcall(function()
+            slot:SetHorizontalAlignment(2)
+            slot:SetVerticalAlignment(2)
+        end)
+        local face = scr.box(on and SWITCH_ON or SWITCH_OFF, inner, 0)
+        local cell = face
+        if not on then
+            pcall(function()
+                face:SetVisibility(4)
+                inner:SetVisibility(4)
+            end)
+            local hit = scr.hit(def[2], function() Look.setGender(def[1]) end)
+            cell = scr.new("Overlay")
+            cell:AddChildToOverlay(scr.sized(hit.widget, SW, SH))
+            cell:AddChildToOverlay(face)
+        end
+        switch:AddChildToHorizontalBox(cell):SetPadding({ Left = n > 1 and 2 or 0, Top = 0, Right = 0, Bottom = 0 })
+    end
+    -- (below the game's own warning banner, which can stand at the top right)
+    put(scr.box(SWITCH_EDGE, switch, 2), FIGURE_X, 0.225)
     pcall(showMirror)
+end
+
+-- The other gender on the "who are you" screen: its lists, and what was chosen there before.
+function Look.setGender(g)
+    if not SETS[g] or g == state.gender then return end
+    state.other[state.gender] = { outfit = state.outfit, face = state.face, hair = state.hair, hat = state.hat, glasses = state.glasses }
+    state.gender = g
+    local back = type(state.other[g]) == "table" and state.other[g] or {}
+    state.outfit = (byId[back.outfit] and genderOf[back.outfit] == g) and back.outfit or S().default
+    state.face = S().faces[tonumber(back.face) or 0] and tonumber(back.face) or 1
+    state.hair = S().hair[tonumber(back.hair) or 0] and tonumber(back.hair) or firstHair()
+    if S().hair[state.hair].price then state.hair = firstHair() end
+    local hat = tonumber(back.hat) or 0
+    state.hat = (S().hair[hat] and S().hair[hat].price and state.ownedHair[hk(hat)]) and hat or 0
+    if not byId[state.outfit].starter and not state.owned[state.outfit] then state.outfit = S().default end
+    local g = tonumber(back.glasses) or 0
+    state.glasses = (S().glasses[g] and state.ownedGlasses[gk(g)]) and g or 0
+    if Look.page == "start" then renderStart() end
 end
 
 -- A screen that was taken away with its world (a load, the main menu) is forgotten
@@ -750,8 +1133,8 @@ function Look.openStart()
     stale()
     if scr or not World.player() then return false end
     load()
-    if HAIR[state.hair] and HAIR[state.hair].price and not state.ownedHair[tostring(state.hair)] then state.hair = 1 end
-    if not byId[state.outfit].starter and not state.owned[state.outfit] then state.outfit = "jacket" end
+    if S().hair[state.hair] and S().hair[state.hair].price then state.hair = firstHair() end
+    if not byId[state.outfit].starter and not state.owned[state.outfit] then state.outfit = S().default end
     if not frame("WHO ARE YOU?") then return false end
     hold()
     Look.page = "start"
@@ -774,26 +1157,68 @@ local shopScroll = 0
 local function shopItems()
     local items = {}
     local mine = Look.page == "wardrobe"
-    if shopTab ~= "hats" then
-        for _, o in ipairs(OUTFITS) do
+    -- the formal store has formal wear only; Marco everything else, hats and glasses
+    local formal = not mine and Look.store ~= nil and Look.store.ID == "formal"
+    if shopTab == "all" or shopTab == "outfits" then
+        for _, o in ipairs(S().outfits) do
             local owned = state.owned[o.id] == true
-            if owned or not mine then
+            local sold = mine or formal == (o.shop == "formal")
+            if sold and (owned or not mine) then
                 items[#items + 1] = { name = o.name, kind = "Outfit", body = o.body, price = o.price, owned = owned, on = state.outfit == o.id,
-                    tried = preview ~= nil and preview.body == o.body,
-                    try = function() preview = { body = o.body } end,
+                    slot = "body", tried = preview ~= nil and preview.body == o.body,
+                    try = function() tryOn("body", o.body) end,
                     take = function() state.outfit = o.id end, own = function() state.owned[o.id] = true end }
             end
         end
     end
-    if shopTab ~= "outfits" then
-        for i, h in ipairs(HAIR) do
+    if shopTab == "all" or shopTab == "hats" or shopTab == "hair" then
+        -- Bald first, the other hair, then "No hat" and the hats this shop sells
+        local order = {}
+        for i, h in ipairs(S().hair) do if not h.price and h.mesh == "" then order[#order + 1] = i end end
+        for i, h in ipairs(S().hair) do if not h.price and h.mesh ~= "" then order[#order + 1] = i end end
+        for i, h in ipairs(S().hair) do
+            if h.price and (mine or formal == (h.shop == "formal")) then order[#order + 1] = i end
+        end
+        local nowHat = state.hat or 0
+        for n, i in ipairs(order) do
+            local h = S().hair[i]
+            local wanted = shopTab == "all" or (shopTab == "hats") == (h.price ~= nil)
+            if not wanted then goto next end
+            if h.price and (n == 1 or not S().hair[order[n - 1]].price) then
+                items[#items + 1] = { name = "No hat", kind = "Hat", hat = "", price = 0, owned = true, on = nowHat == 0,
+                    slot = "hat", tried = preview ~= nil and preview.hat == "", try = function() tryOn("hat", "") end,
+                    take = function() state.hat = 0 end, own = function() end }
+            end
             local price = h.price or 0
-            local owned = price == 0 or state.ownedHair[tostring(i)] == true
+            local owned = price == 0 or state.ownedHair[hk(i)] == true
             if owned or not mine then
-                items[#items + 1] = { name = h.name, kind = h.price and "Hat" or "Hair", hair = h.mesh, price = price, owned = owned,
-                    on = state.hair == i, tried = preview ~= nil and preview.hair == h.mesh,
-                    try = function() preview = { hair = h.mesh } end,
-                    take = function() state.hair = i end, own = function() state.ownedHair[tostring(i)] = true end }
+                if h.price then
+                    items[#items + 1] = { name = h.name, kind = "Hat", hat = h.mesh, price = price, owned = owned,
+                        on = nowHat == i, slot = "hat", tried = preview ~= nil and preview.hat == h.mesh,
+                        try = function() tryOn("hat", h.mesh) end,
+                        take = function() state.hat = i end, own = function() state.ownedHair[hk(i)] = true end }
+                else
+                    items[#items + 1] = { name = h.name, kind = "Hair", hair = h.mesh, price = 0, owned = true,
+                        on = state.hair == i, slot = "hair", tried = preview ~= nil and preview.hair == h.mesh,
+                        try = function() tryOn("hair", h.mesh) end,
+                        take = function() state.hair = i end, own = function() end }
+                end
+            end
+            ::next::
+        end
+    end
+    if shopTab == "all" or shopTab == "glasses" then
+        local now = state.glasses or 0
+        items[#items + 1] = { name = "No glasses", kind = "Glasses", glasses = "", price = 0, owned = true, on = now == 0,
+            slot = "glasses", tried = preview ~= nil and preview.glasses == "", try = function() tryOn("glasses", "") end,
+            take = function() state.glasses = 0 end, own = function() end }
+        for i, g in ipairs(S().glasses) do
+            local owned = state.ownedGlasses[gk(i)] == true
+            if (owned or not mine) and (mine or formal == (g.shop == "formal")) then
+                items[#items + 1] = { name = g.name, kind = "Glasses", glasses = g.mesh, price = g.price, owned = owned,
+                    on = now == i, slot = "glasses", tried = preview ~= nil and preview.glasses == g.mesh,
+                    try = function() tryOn("glasses", g.mesh) end,
+                    take = function() state.glasses = i end, own = function() state.ownedGlasses[gk(i)] = true end }
             end
         end
     end
@@ -821,7 +1246,7 @@ renderShop = function()
     top:AddChildToHorizontalBox(x.box):SetVerticalAlignment(2)
     put(top, 1 - LEFT, 0.05, BUTTON_INSET * 1.5, 0, 1, 0.5)
     -- the tabs: one row starting at the left margin, the same distance between them
-    local tabs = { { "all", "ALL" }, { "outfits", "OUTFITS" }, { "hats", "HATS AND HAIR" } }
+    local tabs = { { "all", "ALL" }, { "outfits", "OUTFITS" }, { "hair", "HAIR" }, { "hats", "HATS" }, { "glasses", "GLASSES" } }
     local bar = scr.new("HorizontalBox")
     for i, t in ipairs(tabs) do
         local b = scr.bigButton(t[2], 1.3, function()
@@ -850,8 +1275,8 @@ renderShop = function()
         if mine then corner = nil end
         local buttons = {}
         if not it.on and not mine then
-            buttons[1] = { it.tried and "PREVIEWING" or "PREVIEW", function()
-                if it.tried then preview = nil else it.try() end
+            buttons[1] = { "PREVIEW", function()
+                if it.tried then takeOff(it.slot) else it.try() end
                 renderShop()
             end, false, it.tried and Screen.GREEN or nil }
         end
@@ -862,9 +1287,10 @@ renderShop = function()
                     return
                 end
                 it.own()
+                syncSelf()
             end
             it.take()
-            preview = nil
+            takeOff(it.slot)
             changed()
             renderShop()
         end, it.on or (not it.owned and money < it.price) }
@@ -872,46 +1298,79 @@ renderShop = function()
         local pic, gap
         if it.body then
             pic = Thumbs.image(scr, "b|" .. it.body .. "|" .. now.head, { look = { body = it.body, head = now.head, hair = now.hair, arms = true }, shot = "body" }, 120, 180)
+        elseif it.glasses then
+            pic, gap = Thumbs.image(scr, "g|" .. it.glasses .. "|" .. now.head .. "|" .. now.hair, { look = { body = now.body, head = now.head, hair = now.hair, glasses = it.glasses, arms = true }, shot = "face" }, 120, 120), 30
         else
-            pic, gap = Thumbs.image(scr, "h|" .. it.hair .. "|" .. now.head, { look = { body = now.body, head = now.head, hair = it.hair, arms = true }, shot = "hair" }, 120, 120), 30
+            if it.hat then
+                -- (a hat on a bald head, so that the hat itself is what the picture shows;
+                -- "No hat" with the player's own hair)
+                local short = it.hat == "" and (now.hair or "") or ""
+                pic, gap = Thumbs.image(scr, "c|" .. it.hat .. "|" .. now.head .. "|" .. short, { look = { body = now.body, head = now.head, hair = short, hat = it.hat, arms = true }, shot = "hair" }, 120, 120), 30
+            else
+                local hat = (now.hat and not Avatar.hidesHair(now.hat)) and now.hat or nil
+                pic, gap = Thumbs.image(scr, "h|" .. it.hair .. "|" .. now.head .. "|" .. tostring(hat), { look = { body = now.body, head = now.head, hair = it.hair, hat = hat, arms = true }, shot = "hair" }, 120, 120), 30
+            end
         end
-        local cell = tile(tileW, mine and 306 or 330, it.name, { it.kind }, corner, color, buttons, it.on, pic, gap)
+        local onCard = nil
+        if mine then
+            if not it.on then onCard = buttons[#buttons][2] end
+        elseif not it.on then
+            onCard = function()
+                if not it.tried then it.try() end
+                renderShop()
+            end
+        end
+        local cell = tile(tileW, mine and 306 or 330, it.name, { it.kind }, corner, color, buttons, it.on, pic, gap, onCard,
+            it.body or it.hair or (it.hat and ("hat:" .. it.hat)) or ("glasses:" .. it.glasses))
         local slot = wrap:AddChild(cell)
         pcall(function() slot:SetPadding({ Left = 0, Top = 0, Right = GAP, Bottom = GAP }) end)
     end
     local offset = shopScroll
     pcall(function() list:SetScrollOffset(offset) end)
     Core.after(0.05, function() pcall(function() if scr and scr.shopList == list then list:SetScrollOffset(offset) end end) end)
-    if preview then put(scr.text("PREVIEW", "button", 18, Screen.GREEN), FIGURE_X, 0.14) end
+    -- (below where the game's own tips and warnings stand at the top right)
+    if preview then put(scr.text("PREVIEW", "button", 18, Screen.GREEN), FIGURE_X, 0.215) end
     pcall(showMirror)
 end
 
-function Look.openShop()
+function Look.openShop(store)
     stale()
     if scr or not World.player() then return false end
     load()
-    if not Look.atShop() then return false end
-    if not frame("CLOTHES") then return false end
+    store = store or storeNear() or Clerk
+    if not Look.atShop(store) then return false end
+    Look.store, Look.fitting = store, store.FITTING
+    if store.ID == "formal" then shopTab, shopScroll = "all", 0 end
+    if not frame(store.TITLE or "CLOTHES") then return false end
+    if store.solid then pcall(store.solid, false) end
     -- The player is put at the viewpoint and turned so that the figure in front of the
     -- rack is in the middle of the part of the picture the panel leaves free, between the
     -- bar at the top and the bottom edge. Closing the screen puts the player back.
-    local pitch, back = 0, nil
+    local pitch, back, lowered = 0, nil, false
     pcall(function()
         local p = World.player()
         local l = p:K2_GetActorLocation()
         back = { x = l.X, y = l.Y, z = l.Z }
-        p:K2_SetActorLocation({ X = Clerk.VIEWPOINT.x, Y = Clerk.VIEWPOINT.y, Z = l.Z }, false, {}, true)
-        local spot = Clerk.FITTING
+        p:K2_SetActorLocation({ X = store.VIEWPOINT.x, Y = store.VIEWPOINT.y, Z = l.Z }, false, {}, true)
+        local spot = store.FITTING
         local eye, tx, ty = view()
         local dx, dy = spot.x - eye.X, spot.y - eye.Y
         local aside = math.atan((2 * FIGURE_X - 1) * tx)
         local depth = math.max(60, math.sqrt(dx * dx + dy * dy) * math.cos(aside))
-        local down = math.atan((1 - 2 * 0.55) * ty)
-        pitch = math.deg(math.atan((spot.z - eye.Z) / depth) - down)
+        -- The camera stays level (looking down at the figure would make it lean in the
+        -- picture): the player is let down until the eye is just above the figure's middle,
+        -- which then sits a little below the middle of the picture, as on the other screens.
+        -- (No walking until the screen closes; then back where they were. Collision stays:
+        -- the game puts a shop's furniture up only around a player with collision.)
+        local lift = (2 * 0.55 - 1) * ty * depth
+        p.CharacterMovement:SetMovementMode(0, 0)
+        p:K2_SetActorLocation({ X = store.VIEWPOINT.x, Y = store.VIEWPOINT.y, Z = spot.z + lift - EYE_HEIGHT }, false, {}, true)
+        lowered = true
+        pitch = 0
         p:GetController():SetControlRotation({ Pitch = pitch, Yaw = math.deg(math.atan(dy, dx)) - math.deg(aside), Roll = 0 })
     end)
     hold(pitch)
-    if pose then pose.back = back end
+    if pose then pose.back, pose.lowered = back, lowered end
     Look.page = "shop"
     renderShop()
     return true
@@ -942,6 +1401,32 @@ local function wardrobeNear()
 end
 function Look.atWardrobe() return wardrobeNear() ~= nil end
 
+-- How far along `yaw` the room is free for the wardrobe's figure: lines from the eye to
+-- points ahead at three heights (feet, middle, head), up to the first thing in the way.
+local KSL = nil
+local SHOP_DISTANCE = 307        -- how far the shops' figures are from their viewpoints
+local function roomAlong(p, floor, yaw)
+    KSL = KSL or StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+    local eye = view()
+    local r = math.rad(yaw)
+    local free = 0
+    for d = 90, SHOP_DISTANCE + 60, 15 do
+        local x, y = eye.X + math.cos(r) * d, eye.Y + math.sin(r) * d
+        local blocked = false
+        for _, h in ipairs({ 25, 90, 165 }) do
+            local hit = {}
+            local ok, yes = pcall(function()
+                return KSL:LineTraceSingle(p, eye, { X = x, Y = y, Z = floor + h }, 0, false, {}, 0, hit, true,
+                    { R = 1, G = 0, B = 0, A = 1 }, { R = 0, G = 1, B = 0, A = 1 }, 0)
+            end)
+            if ok and yes then blocked = true break end
+        end
+        if blocked then break end
+        free = d
+    end
+    return free
+end
+
 -- The wardrobe at home: what the player owns, nothing to buy.
 function Look.openWardrobe()
     stale()
@@ -950,14 +1435,42 @@ function Look.openWardrobe()
     local w = wardrobeNear()
     if not w then return false end
     if not frame("WARDROBE") then return false end
-    -- The figure stands in front of the player: with their back to the wardrobe it is in
-    -- the room, not inside the furniture.
+    -- The figure is shown as in the shops: standing on the floor where the room is most
+    -- open (first choice: with the player's back to the wardrobe, so that it is not inside
+    -- the furniture), the camera level at its height. Where the room is small it stands
+    -- nearer and is made as much smaller, so that it looks the same.
+    local back, lowered = nil, false
+    Look.fitting = nil
     pcall(function()
         local p = World.player()
         local l = p:K2_GetActorLocation()
-        p:GetController():SetControlRotation({ Pitch = 0, Yaw = math.deg(math.atan(l.Y - w.y, l.X - w.x)), Roll = 0 })
+        back = { x = l.X, y = l.Y, z = l.Z }
+        local half = 92
+        pcall(function() half = p.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+        local floor = l.Z - half
+        local away = math.deg(math.atan(l.Y - w.y, l.X - w.x))
+        local best, bestRoom = away, -1
+        for _, turn in ipairs({ 0, 45, -45, 90, -90, 135, -135, 180 }) do
+            local room = roomAlong(p, floor, away + turn)
+            if room > bestRoom + 15 then best, bestRoom = away + turn, room end
+            if room >= SHOP_DISTANCE + 40 then break end
+        end
+        local d = math.max(70, math.min(SHOP_DISTANCE, bestRoom - 40))
+        local size = d / SHOP_DISTANCE
+        local eye, tx, ty = view()
+        local r = math.rad(best)
+        Look.fitting = { x = eye.X + math.cos(r) * d, y = eye.Y + math.sin(r) * d, z = floor + 88, size = size }
+        -- turned so that the figure is in the middle of the part of the picture the panel
+        -- leaves free; let down until the eye is just above the figure's middle
+        local aside = math.atan((2 * FIGURE_X - 1) * tx)
+        local lift = (2 * 0.55 - 1) * ty * d * math.cos(aside)
+        p.CharacterMovement:SetMovementMode(0, 0)
+        p:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = floor + 88 * size + lift - EYE_HEIGHT }, false, {}, true)
+        lowered = true
+        p:GetController():SetControlRotation({ Pitch = 0, Yaw = best - math.deg(aside), Roll = 0 })
     end)
-    hold()
+    hold(0)
+    if pose then pose.back, pose.lowered = back, lowered end
     Look.page = "wardrobe"
     shopTab, shopScroll = "all", 0
     renderShop()
@@ -965,6 +1478,9 @@ function Look.openWardrobe()
 end
 
 function Look.close() closeScreen() end
+-- (for test scripts) show another tab of the open shop
+function Look.showTab(t) if scr and Look.page ~= "start" then shopTab, shopScroll = t, 0 renderShop() end end
+function Look.scrollTo(v) if scr and scr.shopList then pcall(function() if v >= 99 then scr.shopList:ScrollToEnd() else scr.shopList:SetScrollOffset(v) end end) end end
 
 -- The interaction key: the blackjack table at the club, the clothes shop at Donald's, a
 -- wardrobe at home.
@@ -973,9 +1489,10 @@ function Look.toggle()
         if Look.page == "shop" or Look.page == "wardrobe" then closeScreen() end
         return
     end
-    if Look.atClerk() then
+    local store = storeNear()
+    if store then
         -- the shopkeeper's dialogue leads to the screen; without it the screen opens directly
-        if not Clerk.talk() then Look.openShop() end
+        if not store.talk() then Look.openShop(store) end
     elseif Look.atWardrobe() then
         Look.openWardrobe()
     end
@@ -987,11 +1504,11 @@ end
 function Look.disguise()
     load()
     local outfits, hats = {}, {}
-    for _, o in ipairs(OUTFITS) do
+    for _, o in ipairs(S().outfits) do
         if state.owned[o.id] and o.id ~= state.outfit then outfits[#outfits + 1] = o end
     end
-    for i, h in ipairs(HAIR) do
-        if h.price and state.ownedHair[tostring(i)] and i ~= state.hair then hats[#hats + 1] = i end
+    for i, h in ipairs(S().hair) do
+        if h.price and state.ownedHair[hk(i)] and i ~= state.hat then hats[#hats + 1] = i end
     end
     if #outfits == 0 and #hats == 0 then return nil end
     local worn = {}
@@ -1002,8 +1519,8 @@ function Look.disguise()
     end
     if #hats > 0 then
         local i = hats[math.random(#hats)]
-        state.hair = i
-        worn[#worn + 1] = HAIR[i].name
+        state.hat = i
+        worn[#worn + 1] = S().hair[i].name
     end
     save()
     Look.announce()
@@ -1017,7 +1534,7 @@ Core.Hooks.add(WARDROBE .. ":endCopAlert", function()
     local ok, e = pcall(Look.disguise)
     if not ok then log("Wardrobe: change of clothes failed: %s", tostring(e)) end
 end)
-Clerk.onShow = function() Look.openShop() end
+Clerk.onShow = function() Look.openShop(Clerk) end
 
 if Core.bindKey then
     Core.bindKey(Core.config.WardrobeKey or "U", function()
@@ -1029,23 +1546,170 @@ if Core.bindKey then
     end)
 end
 
+---------------------------------------------------------------- the player's own hands
+
+-- In first person the game shows one pair of arms (with the phone, the flashlight...),
+-- always pale. With a dark face (the men's dark one, the women's 2 and 6) they are darker:
+-- see armsSkin. Every other face keeps the game's arms. This is the player's own view only.
+-- The darker arms: the citizens' skin material, one colour all over (with the arms' own
+-- relief), so dark. (Their skin materials cut out what the arms' picture leaves
+-- transparent, the fingernails among it: so not the arms' picture itself.)
+local ARMS_SKIN = {
+    SK_ma_head_04_dark = { R = 0.025, G = 0.01, B = 0.004, A = 1 },
+    SK_fe_head_05 = { R = 0.025, G = 0.01, B = 0.004, A = 1 },
+    SK_fe_head_01_dark = { R = 0.06, G = 0.025, B = 0.01, A = 1 },
+}
+local ARMS_BASE = "/Game/CitizenNPC/CharacterParts/Materials/Basebody/MI_ma_body_01_deep.MI_ma_body_01_deep"
+local WHITE = "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"
+local ARMS = "/Game/Skeletal/FPP_Arms/"
+local armsFor = nil
+
+local function armsSkin()
+    local player = World.player()
+    if not player then
+        armsFor = nil
+        return
+    end
+    load()
+    local head = S().faces[state.face] or ""
+    local key = player:GetAddress() .. "|" .. head
+    if armsFor == key then return end
+    local ok, e = pcall(function()
+        local c = player.fpsArms
+        if not valid(c) then return end
+        local tone = ARMS_SKIN[head]
+        if not tone then
+            local own = Avatar.asset(ARMS .. "fppArms_MAT.fppArms_MAT")
+            if own then c:SetMaterial(1, own) end
+        else
+            local base = Avatar.asset(ARMS_BASE)
+            if not base then return end
+            local d = c:CreateDynamicMaterialInstance(1, base, FName("None"))
+            if not valid(d) then return end
+            local white = Avatar.asset(WHITE)
+            d:SetTextureParameterValue(FName("Albedo"), white)
+            d:SetTextureParameterValue(FName("Normal"), Avatar.asset(ARMS .. "fppArms_texNorm.fppArms_texNorm"))
+            d:SetTextureParameterValue(FName("Tint Mask"), white)
+            d:SetVectorParameterValue(FName("R: Primary"), tone)
+        end
+        armsFor = key
+    end)
+    if not ok then
+        armsFor = key
+        log("First-person arms: %s", tostring(e))
+    end
+end
+Core.every(1, armsSkin)
+
+---------------------------------------------------------------- the inventory figure
+
+-- The inventory screen shows a figure seen from behind: the game films its own posed model
+-- (inventoryCharacterBP: a hooded man, a camera in front of his back, far outside the
+-- city) into the screen's picture. That model is hidden as soon as the world is there and
+-- a figure dressed like the player stands in its place all the time (built anew whenever
+-- the look changes), so that the screen never shows the hooded man, not even while opening.
+local INV_CHARACTER = "inventoryCharacterBP_C"
+local invFigure = nil       -- { fig, key, model }
+local invCheck = 0
+
+Core.onTick(function()
+    local now = os.clock()
+    local player = World.player()
+    local open = false
+    if player then pcall(function() open = player.inventoryOpen == true end) end
+    if now - invCheck < (open and 0.1 or 0.5) then return end
+    invCheck = now
+    if not player then
+        invFigure = nil
+        return
+    end
+    local actor = Core.find(INV_CHARACTER)
+    if not valid(actor) then return end
+    local model = nil
+    pcall(function() model = actor.Player_FullRigged end)
+    if not valid(model) then return end
+    pcall(function() if model:IsVisible() then model:SetVisibility(false, false) end end)
+    load()
+    local look = Look.current()
+    local key = table.concat({ look.body or "", look.head or "", look.hair or "", look.hat or "", look.glasses or "", look.beard or "" }, "|")
+    local modelAt = model:GetAddress()
+    if invFigure and invFigure.key == key and invFigure.modelAt == modelAt and valid(invFigure.fig.body) then return end
+    if invFigure then pcall(Avatar.destroyStandIn, invFigure.fig) end
+    invFigure = nil
+    local ok, e = pcall(function()
+        local at = model:K2_GetComponentLocation()
+        local yaw = model:K2_GetComponentRotation().Yaw + 90       -- the model faces +Y at yaw 0
+        -- (standing calmly: the citizens' standing loop without the look over the shoulder)
+        local fig = Avatar.buildStandIn(look, at.X, at.Y, at.Z + 88, yaw, nil, "calm")
+        if not fig then return end
+        -- lit from above and a little behind (the camera looks at its back), itself only
+        pcall(function()
+            local cam = actor.SceneCaptureComponent2D:K2_GetComponentLocation()
+            local dx, dy = cam.X - at.X, cam.Y - at.Y
+            local n = math.max(1, math.sqrt(dx * dx + dy * dy))
+            Avatar.lightFromAbove(fig, at.X + dx / n * 50, at.Y + dy / n * 50, at.Z + 230, 420, 6000)
+        end)
+        -- (only the game's camera for the screen sees it: its pose must move all the same)
+        pcall(function()
+            for _, a in ipairs(fig.actors or {}) do a.SkeletalMeshComponent.VisibilityBasedAnimTickOption = 0 end
+        end)
+        invFigure = { fig = fig, key = key, modelAt = modelAt }
+    end)
+    if not ok then log("Inventory figure: %s", tostring(e)) end
+end)
+
+World.listen("stop", function() invFigure = nil end)
+function Look.inventoryFigure() return invFigure and invFigure.fig end      -- (for test scripts)
+
 ---------------------------------------------------------------- upkeep
 
 local traitsFor = nil
+local traitsSettled = nil       -- false while a guest's own level and skills are not in place yet
 local startedAt = 0
+local worldAt = nil
+local ownedFor = nil
 
 Core.every(1, function()
     local player = World.player()
     -- A host is asked who they are as soon as they have a lobby, not only once somebody
     -- has joined.
-    local hosting = Net.isHost()
-    if not player or not (World.active or hosting) then
+    if not player then
         traitsFor = nil
         return
     end
     load()
-    -- A new character object after every load: give it the traits again.
+    -- A new character object after every load: who the player is in this save, then the
+    -- traits again. (The "who are you" screen and the traits are there in single player
+    -- too; the shops and the wardrobe screen with SoloExtras.)
     local address = player:GetAddress()
+    if address ~= worldAt then
+        worldAt, startedAt = address, os.clock()
+    end
+    local mine = Guests.ready() and Guests.self() or nil
+    if Guests.ready() and ownedFor ~= address then
+        ownedFor = address
+        local before = Look.current().body
+        applyOwned(mine)
+        -- (a record of before, with the choice only: what was owned then goes into it)
+        if mine and type(mine.owned) ~= "table" then syncSelf() end
+        save()
+        if Look.current().body ~= before then Look.announce() end
+    end
+    if mine and characterById[mine.character] and mine.character ~= state.character then
+        state.character = mine.character
+        traitsFor = nil
+    end
+    -- A guest's own level and skills are put in place a few seconds after the join
+    -- (coop/story.lua). Until then the game holds the host's, and what the character can do
+    -- (stamina, speed, pockets, lock picking, stealth) was worked out from those: it is
+    -- worked out again once the guest's own are there (reported with v0.15.1: after a
+    -- rejoin a guest's skills "look identical to the host's").
+    local story = package.loaded["coop.story"]
+    local settled = World.role ~= "guest" or (story ~= nil and story.isReady() == true)
+    if settled ~= traitsSettled then
+        traitsSettled = settled
+        if settled then traitsFor = nil end
+    end
     if traitsFor ~= address and Core.find("statisticsManager_C") then
         if Look.applyTraits() then traitsFor = address end
     elseif Look.pocketsKept > 0 then
@@ -1058,7 +1722,7 @@ Core.every(1, function()
         end
     end
     if not Hud.ready() then return end
-    ensureMarker()
+    if World.extras() then ensureMarker() end
     if scr then pcall(showMirror) end
     local t = Look.takeover
     if scr or (t and t.isOpen()) then
@@ -1069,12 +1733,20 @@ Core.every(1, function()
         local talking = false
         pcall(function() talking = player.inDialogue == true end)
         if talking then Hud.prompt(nil) else Hud.prompt(key("WardrobeKey"), "Talk") end
-    elseif Look.atWardrobe() then
-        Hud.prompt(key("WardrobeKey"), "Wardrobe")
+    elseif World.extras() and Look.atWardrobe() then
+        -- under the game's own "change clothes (wardrobe)"
+        Hud.prompt(key("WardrobeKey"), "view wardrobe (outfits)", true)
     else
         Hud.prompt(nil)
-        -- Once, at the start: who the player is.
-        if not state.characterPicked and not Core.server and (World.shared() or hosting or Look.debug) and not Screen.current and os.clock() - startedAt > 8 then
+        -- Once in every save (and for a guest once in every world): who the player is.
+        local undecided = Guests.ready() and Guests.self() == nil and not World.joining and not World.gone
+        -- (A test copy started with -ddsmp=NAME keeps the choice it has: nobody is there to
+        -- answer, and the open screen would hold its player where the screen opened.)
+        if undecided and Core.instance and not Look.debug and state.characterPicked then
+            syncSelf()
+            undecided = false
+        end
+        if undecided and not Core.server and not Screen.current and os.clock() - startedAt > 8 and Core.find("statisticsManager_C") then
             local q = Core.find("questManager_C")
             local busy = false
             pcall(function() busy = q.tipActive == true end)
@@ -1097,7 +1769,7 @@ World.listen("peer", function(id)
     Net.send("look", describe(nil), id)
     for other, l in pairs(Avatar.looks) do
         if other ~= id and type(l) == "table" then
-            Net.send("look", { b = l.body, h = l.head, r = l.hair or "", p = other }, id)
+            Net.send("look", { b = l.body, h = l.head, r = l.hair or "", c = l.hat or "", g = l.glasses or "", w = l.beard or "", p = other }, id)
         end
     end
 end)
