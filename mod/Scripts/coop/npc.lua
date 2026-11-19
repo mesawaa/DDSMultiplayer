@@ -33,7 +33,7 @@ end
 
 -- The live client NPC of an order, if this game has one.
 local function clientOfOrder(orderId)
-    for _, npc in ipairs(FindAllOf("baseNPC_C") or {}) do
+    for _, npc in ipairs(Core.actors("/Game/Skeletal/NPC/baseNPC.baseNPC_C") or FindAllOf("baseNPC_C") or {}) do
         local ok, match = pcall(function()
             return Core.alive(npc) and npc.orderID == orderId and npc:GetClass():GetFName():ToString():find("saleClient") ~= nil
         end)
@@ -225,7 +225,7 @@ Core.every(LOOK_EVERY, function()
         end
     end)
     local candidates = {}
-    for _, m in ipairs(FindAllOf("worldMapMarker_C") or {}) do
+    for _, m in ipairs(Core.actors("/Game/GUI/WorldMap/worldMapMarker.worldMapMarker_C") or FindAllOf("worldMapMarker_C") or {}) do
         pcall(function()
             if Core.alive(m) and m.markerCategory == PERSON and m.taskRelated ~= true and not players[m:GetAddress()] then candidates[#candidates + 1] = m end
         end)
@@ -235,7 +235,7 @@ Core.every(LOOK_EVERY, function()
         return
     end
     local owned, unmarked = {}, {}
-    for _, npc in ipairs(FindAllOf("baseNPC_C") or {}) do
+    for _, npc in ipairs(Core.actors("/Game/Skeletal/NPC/baseNPC.baseNPC_C") or FindAllOf("baseNPC_C") or {}) do
         pcall(function()
             if not Core.alive(npc) then return end
             if valid(npc.saleMarker) then
