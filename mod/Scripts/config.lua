@@ -8,6 +8,8 @@ return {
     StatusKey = "F8",
     -- Open the emote wheel: look at an emote and press the key again.
     EmoteKey = "V",
+    -- Switch the strut walk on and off (slower, with a walk of its own).
+    StrutKey = "CAPS_LOCK",
     -- The interaction key of the mod's own places: the clothes shop, the card room's door.
     WardrobeKey = "U",
     -- Show the other players on the map and the compass.
@@ -59,7 +61,9 @@ return {
     -- table. (The player stands where a sofa is; the furniture comes back after this time
     -- and once the player has stepped out of it.)
     CardRoomStandUpSeconds = 3,
-    -- false: emotes are not shown from the outside (the view stays first-person).
+    -- Switch between the first-person view and a view from close behind your character.
+    ThirdPersonKey = "P",
+    -- false: an emote does not switch to that view by itself.
     EmoteThirdPerson = true,
     CasinoBets = { 50, 100, 250, 500, 1000, 2500 },
 

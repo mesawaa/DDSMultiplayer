@@ -134,17 +134,18 @@ local F_OUTFITS = {
     { id = "f_sweater_g", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_01_dark", price = 400 },
     { id = "f_sweater_o", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_01_yellow", price = 400 },
     { id = "f_sweater_s", name = "Sweater, jeans", body = "SK_fe_casual_02_a#MI_fe_casual_03", price = 400 },
-    { id = "f_jumper", starter = true, name = "Jumper, jeans", body = "SK_fe_casual_02_b", price = 300 },
-    { id = "f_jumper_g", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_01_dark", price = 300 },
+    -- (the four to start with are four different colours: the light one, green, the stripes, orange)
+    { id = "f_jumper", name = "Jumper, jeans", body = "SK_fe_casual_02_b", price = 300 },
+    { id = "f_jumper_g", starter = true, name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_01_dark", price = 300 },
     { id = "f_jumper_o", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_01_yellow", price = 300 },
     { id = "f_jumper_s", name = "Jumper, jeans", body = "SK_fe_casual_02_b#MI_fe_casual_03", price = 300 },
     { id = "f_stripes", starter = true, name = "Striped top", body = "SK_fe_casual_02_c", price = 250 },
     { id = "f_stripes_b", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01", price = 250 },
     { id = "f_stripes_g", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01_dark", price = 250 },
     { id = "f_stripes_o", name = "Striped top", body = "SK_fe_casual_02_c#MI_fe_casual_01_yellow", price = 250 },
-    { id = "f_crop", starter = true, name = "Crop top", body = "SK_fe_casual_02_d", price = 200 },
+    { id = "f_crop", name = "Crop top", body = "SK_fe_casual_02_d", price = 200 },
     { id = "f_crop_g", name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_01_dark", price = 200 },
-    { id = "f_crop_o", name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_01_yellow", price = 200 },
+    { id = "f_crop_o", starter = true, name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_01_yellow", price = 200 },
     { id = "f_crop_s", name = "Crop top", body = "SK_fe_casual_02_d#MI_fe_casual_03", price = 200 },
     { id = "f_skirt", name = "Sweater, skirt", body = "SK_fe_clerk_01", price = 200 },
     { id = "f_skirt_b", name = "Sweater, skirt", body = "SK_fe_clerk_01#MI_fe_casual_01", price = 200 },
@@ -185,7 +186,8 @@ local F_HAIR = {
     { name = "Army cap", price = 400, mesh = "Hats_Hair/SK_fe_hat_casual_set_army_cap_01" },
     { name = "Beanie", price = 200, mesh = "Hats_Hair/SK_fe_hat_casual_set_beanie_01_hair" }, { name = "Beanie, second", price = 200, mesh = "Hats_Hair/SK_fe_hat_casual_set_beanie_02" },
     { name = "Beret", price = 500, shop = "formal", mesh = "Hats_Hair/SK_fe_hat_beret_01_a" }, { name = "Beret, second", price = 500, shop = "formal", mesh = "Hats_Hair/SK_fe_hat_beret_01_b" },
-    { name = "Hair 6", mesh = "Hats_Hair/SK_fe_hair_02_eyeglass" },
+    -- (Olivia's only: not among the styles a new character chooses from)
+    { name = "Hair 6", mesh = "Hats_Hair/SK_fe_hair_02_eyeglass", barber = true },
 }
 -- Glasses, bought at Marco's and worn with any hair or hat. None to begin with.
 local M_GLASSES = {
@@ -217,13 +219,13 @@ local BEARDS = {
 }
 local F_GLASSES = {
     { name = "Rimless glasses", mesh = "SK_fe_glass_01_generic", price = 150, shop = "formal" }, { name = "Rectangle glasses", mesh = "SK_fe_glass_05", price = 150, shop = "formal" },
-    { name = "Sports glasses", mesh = "SK_fe_glass_02_scientist", price = 1500 }, { name = "Thick frames", mesh = "SK_fe_glass_03", price = 1500, gone = true },
+    { name = "Sports glasses", mesh = "SK_fe_glass_02_scientist", price = 1000 }, { name = "Thick frames", mesh = "SK_fe_glass_03", price = 1000, gone = true },
     { name = "Thin frames", mesh = "SK_fe_glass_04", price = 200, shop = "formal", gone = true },
     { name = "Rimless glasses", mesh = "SK_fe_glass_01_generic#MI_glass_01_red", price = 150, shop = "formal" },
     { name = "Rimless glasses", mesh = "SK_fe_glass_01_generic#MI_glass_dark2", price = 150, shop = "formal" },
-    { name = "Sports glasses", mesh = "SK_fe_glass_02_scientist#MI_glass_black", price = 1500 },
-    { name = "Thick frames", mesh = "SK_fe_glass_03#MI_glass_01", price = 1500 },
-    { name = "Thick frames", mesh = "SK_fe_glass_03#MI_glass_black", price = 1500 },
+    { name = "Sports glasses", mesh = "SK_fe_glass_02_scientist#MI_glass_black", price = 1000 },
+    { name = "Thick frames", mesh = "SK_fe_glass_03#MI_glass_01", price = 1000 },
+    { name = "Thick frames", mesh = "SK_fe_glass_03#MI_glass_black", price = 1000 },
     { name = "Thin frames", mesh = "SK_fe_glass_04#MI_glass_01", price = 200, shop = "formal" },
     { name = "Thin frames", mesh = "SK_fe_glass_04#MI_glass_black", price = 200, shop = "formal" },
     { name = "Rectangle glasses", mesh = "SK_fe_glass_05#MI_glass_01", price = 150, shop = "formal" },
@@ -316,7 +318,7 @@ local applyingTraits = false
 local function S() return SETS[state.gender] or SETS.m end
 -- the first hairstyle with hair (Bald comes first in the women's list)
 local function firstHair()
-    for i, h in ipairs(S().hair) do if not h.price and h.mesh ~= "" then return i end end
+    for i, h in ipairs(S().hair) do if not h.price and not h.barber and h.mesh ~= "" then return i end end
     return 1
 end
 -- the key a hat of the current gender's list is kept under
@@ -1178,7 +1180,7 @@ renderStart = function()
     local free = {}
     local hairs = S().hair
     for i, h in ipairs(hairs) do if not h.price and h.mesh == "" then free[#free + 1] = i end end
-    for i, h in ipairs(hairs) do if not h.price and h.mesh ~= "" then free[#free + 1] = i end end
+    for i, h in ipairs(hairs) do if not h.price and not h.barber and h.mesh ~= "" then free[#free + 1] = i end end
     heading("HAIR", 24)
     row(#free, 140, function(n, w, h)
         local i = free[n]
@@ -1250,8 +1252,8 @@ function Look.setGender(g)
     state.outfit = (byId[back.outfit] and genderOf[back.outfit] == g) and back.outfit or S().default
     state.face = S().faces[tonumber(back.face) or 0] and tonumber(back.face) or 1
     state.hair = S().hair[tonumber(back.hair) or 0] and tonumber(back.hair) or firstHair()
-    if S().hair[state.hair].price then state.hair = firstHair() end
-    state.hairOff = false
+    if S().hair[state.hair].price or S().hair[state.hair].barber then state.hair = firstHair() end
+    state.hairOff, state.hairColour = false, nil
     local hat = tonumber(back.hat) or 0
     state.hat = (S().hair[hat] and S().hair[hat].price and state.ownedHair[hk(hat)]) and hat or 0
     if not byId[state.outfit].starter and not state.owned[state.outfit] then state.outfit = S().default end
@@ -1274,8 +1276,11 @@ function Look.openStart()
     stale()
     if scr or not World.player() then return false end
     load()
-    if S().hair[state.hair] and S().hair[state.hair].price then state.hair = firstHair() end
+    if S().hair[state.hair] and (S().hair[state.hair].price or S().hair[state.hair].barber) then state.hair = firstHair() end
     if not byId[state.outfit].starter and not state.owned[state.outfit] then state.outfit = S().default end
+    -- (a new character: every style as it comes, nothing dyed or shaved; the beard goes by
+    -- the colour of the style that is chosen)
+    state.hairOff, state.hairColour = false, nil
     if not frame("WHO ARE YOU?") then return false end
     hold()
     Look.page = "start"
@@ -1293,6 +1298,40 @@ local function changed()
 end
 
 local shopScroll = 0
+
+-- Things the formal store sells that are not clothes. The briefcase is the game's own
+-- "Elegant suitcase" (a bag of 4 x 4 that no shop of the game sells any more): the game's
+-- pick-up is made on the shop floor at the buyer's feet, and taken up at once by a buyer
+-- who carries no bag. (The game takes up a bag only into an empty backpack slot.)
+local SUITCASE = "/Game/Interactive/Backpacks/suitcaseBP"
+local function deliverSuitcase()
+    local player = World.player()
+    if not player then return false end
+    local class = StaticFindObject(SUITCASE .. ".suitcaseBP_C")
+    if not valid(class) then
+        pcall(function() LoadAsset(SUITCASE) end)
+        class = StaticFindObject(SUITCASE .. ".suitcaseBP_C")
+    end
+    if not valid(class) then return false end
+    local l = player:K2_GetActorLocation()
+    local r = math.rad(player:K2_GetActorRotation().Yaw)
+    local case = player:GetWorld():SpawnActor(class, { X = l.X + math.cos(r) * 60, Y = l.Y + math.sin(r) * 60, Z = l.Z }, { Pitch = 0, Yaw = 0, Roll = 0 })
+    if not valid(case) then return false end
+    local free = false
+    pcall(function() free = player.InventoryComponent.CurBackpackID:ToString() == "None" end)
+    if free then
+        Core.after(0.4, function()
+            pcall(function() if Core.alive(case) then case:objectPickup() end end)
+        end)
+        Hud.toast("The briefcase is yours", 4)
+    else
+        Hud.toast("Put your bag down to take the briefcase", 7)
+    end
+    return true
+end
+local OTHER_GOODS = {
+    { name = "Elegant briefcase", kind = "Bag", price = 600, icon = "/Game/Interactive/Backpacks/Icons/Suitcase1.Suitcase1", deliver = deliverSuitcase },
+}
 
 -- What the grid shows: everything there is at the shop, what the player owns at a wardrobe.
 local function shopItems()
@@ -1366,6 +1405,12 @@ local function shopItems()
             end
         end
     end
+    -- OTHER, at the formal store: things that are not worn. Bought again every time.
+    if formal and (shopTab == "all" or shopTab == "other") then
+        for _, o in ipairs(OTHER_GOODS) do
+            items[#items + 1] = { name = o.name, kind = o.kind, price = o.price, owned = false, on = false, other = o }
+        end
+    end
     return items
 end
 
@@ -1391,6 +1436,7 @@ renderShop = function()
     put(top, 1 - LEFT, 0.05, BUTTON_INSET * 1.5, 0, 1, 0.5)
     -- the tabs: one row starting at the left margin, the same distance between them
     local tabs = { { "all", "ALL" }, { "outfits", "OUTFITS" }, { "hair", "HAIR" }, { "hats", "HATS" }, { "glasses", "GLASSES" } }
+    if not mine and Look.store ~= nil and Look.store.ID == "formal" then tabs[#tabs + 1] = { "other", "OTHER" } end
     local bar = scr.new("HorizontalBox")
     for i, t in ipairs(tabs) do
         local b = scr.bigButton(t[2], 1.3, function()
@@ -1418,6 +1464,33 @@ renderShop = function()
         elseif it.owned then label, corner, color = "WEAR", it.price > 0 and "yours" or "free", Screen.GREY end
         if mine then corner = nil end
         local buttons = {}
+        if it.other then
+            local o = it.other
+            buttons[1] = { "BUY", function()
+                if not pay(o.price) then
+                    Hud.toast(string.format("Not enough money in the bank for this ($%d)", o.price), 4)
+                    return
+                end
+                local ok, done = pcall(o.deliver)
+                if not ok or not done then
+                    -- (nothing handed over: the money goes back)
+                    pcall(function() local m, c = bank() c.playerBankMoney = m + o.price end)
+                    log("Could not hand over %s: %s", o.name, tostring(done))
+                end
+                renderShop()
+            end, money < o.price }
+            local pic = nil
+            local tex = texture(o.icon)
+            if tex then
+                local img = scr.new("Image")
+                pcall(function() img:SetBrushFromTexture(tex, false) end)
+                pic = scr.sized(img, 120, 120)
+            end
+            local cell = tile(tileW, 330, it.name, { it.kind }, corner, color, buttons, false, pic, 30, nil, "other:" .. o.name)
+            local slot = wrap:AddChild(cell)
+            pcall(function() slot:SetPadding({ Left = 0, Top = 0, Right = GAP, Bottom = GAP }) end)
+            goto continue
+        end
         if not it.on and not mine then
             buttons[1] = { "PREVIEW", function()
                 if it.tried then takeOff(it.slot) else it.try() end
@@ -1468,6 +1541,7 @@ renderShop = function()
             it.body or it.hair or (it.hat and ("hat:" .. it.hat)) or ("glasses:" .. it.glasses))
         local slot = wrap:AddChild(cell)
         pcall(function() slot:SetPadding({ Left = 0, Top = 0, Right = GAP, Bottom = GAP }) end)
+        ::continue::
     end
     local offset = shopScroll
     pcall(function() list:SetScrollOffset(offset) end)
@@ -1484,6 +1558,8 @@ end
 -- CUTS goes back), and the colours can be tried one after the other on the figure, a
 -- close-up of the face, before anything is paid. BEARD (men) has the beards, which are
 -- always the colour of the hair. PAY takes what is different from what the player has.
+-- Bald costs nothing, ever: the head is shaved and the style the player paid for is kept
+-- (state.hairOff), so going back to that style in its colour costs nothing either.
 local barberTab, barberStep, barberScroll, pick = "hair", "cuts", 0, nil
 local renderBarber
 
@@ -1514,10 +1590,18 @@ local function barberCost()
         lines[#lines + 1] = string.format("%s $%d", label, price)
         total = total + price
     end
-    if pick.hair ~= pick.had then add("CUT", BARBER_PRICE.cut) end
-    if pick.colour ~= state.hairColour then add("COLOUR", BARBER_PRICE.colour) end
+    if pickedStyle() ~= "" then
+        if pick.hair ~= state.hair then add("CUT", BARBER_PRICE.cut) end
+        if pick.colour ~= state.hairColour then add("COLOUR", BARBER_PRICE.colour) end
+    end
     if state.gender == "m" and pick.beard ~= (state.beard or 0) then add("BEARD", BARBER_PRICE.beard) end
     return total, lines
+end
+-- Whether the choice is anything else than what the player wears now (it may cost nothing).
+local function barberDiffers()
+    if pick.hair ~= pick.had then return true end
+    if pickedStyle() ~= "" and pick.colour ~= state.hairColour then return true end
+    return state.gender == "m" and pick.beard ~= (state.beard or 0)
 end
 
 renderBarber = function()
@@ -1633,12 +1717,14 @@ renderBarber = function()
             local style = S().hair[i]
             local hair = dressed(style.mesh, pick.colour)
             local pic = Thumbs.image(scr, "h|" .. hair .. "|" .. now.head, { look = { body = now.body, head = now.head, hair = hair, arms = true }, shot = "hair" }, 104, 104)
-            card(style.name, "Cut", BARBER_PRICE.cut, i == pick.had, pick.hair == i, pic, function()
+            local bald = style.mesh == ""
+            card(style.name, "Cut", BARBER_PRICE.cut, bald or i == state.hair, pick.hair == i, pic, function()
                 pick.hair = i
-                -- a cut with hair goes on to its colours
-                if style.mesh ~= "" then barberStep, barberScroll = "colours", 0 end
+                -- a cut with hair goes on to its colours; a shaved head keeps the colour the
+                -- player has (the beard's, and the hair's when it is worn again)
+                if bald then pick.colour = state.hairColour else barberStep, barberScroll = "colours", 0 end
                 renderBarber()
-            end, "hair" .. i)
+            end, "hair" .. i, nil, bald and "free" or nil)
         end
     end
     local offset = barberScroll
@@ -1653,22 +1739,29 @@ renderBarber = function()
         sum:SetVerticalAlignment(2)
         sum:SetPadding({ Left = 0, Top = 0, Right = 28, Bottom = 0 })
     end
-    local payButton = scr.bigButton(total > 0 and string.format("PAY $%d", total) or "NOTHING CHANGED", 1.5, function()
+    local differs = barberDiffers()
+    local payButton = scr.bigButton(total > 0 and string.format("PAY $%d", total) or (differs and "APPLY" or "NOTHING CHANGED"), 1.5, function()
         local cost = barberCost()
-        if cost <= 0 then return end
-        if not pay(cost) then
+        if not barberDiffers() then return end
+        if cost > 0 and not pay(cost) then
             Hud.toast(string.format("Not enough money in the bank for this ($%d)", cost), 4)
             return
         end
-        state.hair, state.hairOff, state.hairColour = pick.hair, false, pick.colour
+        -- (what has been paid at Olivia's: the wall quest counts it, coop/wallquest.lua)
+        Look.barberPaid = (Look.barberPaid or 0) + cost
+        if pickedStyle() == "" and pick.hair ~= state.hair then
+            state.hairOff = true                 -- (shaved: the style and its colour stay the player's)
+        else
+            state.hair, state.hairOff, state.hairColour = pick.hair, false, pick.colour
+        end
         if men then state.beard = pick.beard end
         pick.had = pick.hair
         changed()
         Hud.toast("Olivia: there you go", 4)
         renderBarber()
     end)
-    if total <= 0 or money < total then scr.enable(payButton, false) end
-    if total > 0 and money >= total then scr.tint(payButton, Screen.GREEN) end
+    if not differs or money < total then scr.enable(payButton, false) end
+    if differs and money >= total then scr.tint(payButton, Screen.GREEN) end
     foot:AddChildToHorizontalBox(payButton.box):SetVerticalAlignment(2)
     put(foot, PANEL_W - LEFT, 0.94, BUTTON_INSET * 1.5, 0, 1, 0.5)
 
@@ -2066,6 +2159,36 @@ local startedAt = 0
 local worldAt = nil
 local ownedFor = nil
 
+-- A new game's first call (Eddie) comes while the player is still on the "who are you"
+-- screen, and it comes again and again until it is answered. Until the choice is made the
+-- phone makes no sound (ring or vibration: both are the phone's one sound component); the
+-- call itself is the game's and goes on, so the phone rings at its next ring (every three
+-- seconds) once the choice is made.
+local ringQuiet = nil       -- { phone address, the volume it had }
+local function tendRing(player, quiet)
+    local ok, e = pcall(function()
+        local phone = player.phoneRef
+        if not valid(phone) or not valid(phone.ringTone) then
+            ringQuiet = nil
+            return
+        end
+        local address = phone:GetAddress()
+        if ringQuiet and ringQuiet.phone ~= address then ringQuiet = nil end
+        if quiet and not ringQuiet then
+            local was = tonumber(phone.ringTone.VolumeMultiplier) or 1
+            ringQuiet = { phone = address, was = was > 0 and was or 1 }
+            phone.ringTone:SetVolumeMultiplier(0)
+            log("Look: the phone is silent until the player has chosen who they are")
+        elseif not quiet and ringQuiet then
+            phone.ringTone:SetVolumeMultiplier(ringQuiet.was)
+            ringQuiet = nil
+            log("Look: the phone rings again")
+        end
+    end)
+    if not ok then log("Look: the phone's ring: %s", tostring(e)) end
+end
+function Look.ringQuiet() return ringQuiet ~= nil end       -- (for test scripts)
+
 Core.every(1, function()
     local player = World.player()
     -- A host is asked who they are as soon as they have a lobby, not only once somebody
@@ -2117,6 +2240,12 @@ Core.every(1, function()
             local _, kept = pocketBase(player, defaults, c)
             if kept ~= Look.pocketsKept then Look.applyTraits() end
         end
+    end
+    do
+        -- (as below: who has not chosen yet; a test copy that keeps its choice has)
+        local choosing = Look.page == "start" or (Guests.ready() and Guests.self() == nil and not World.joining and not World.gone and not Core.server
+            and not (Core.instance and not Look.debug and state.characterPicked))
+        tendRing(player, choosing == true)
     end
     if not Hud.ready() then return end
     if World.extras() then ensureMarker() end

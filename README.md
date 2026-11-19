@@ -11,6 +11,7 @@ compiled code, the Steam bridge DLL.
 | File in the archive | What it is | Source |
 |---|---|---|
 | `ue4ss/Mods/DDSMultiplayer/Scripts/**.lua` | The mod. Plain Lua, run by UE4SS. | `mod/Scripts/` here |
+| `ue4ss/Mods/DDSMultiplayer/assets/**.png` | Pictures the mod loads (the scratch tickets). | `mod/assets/` here |
 | `ue4ss/Mods/DDSMultiplayer/bin/ddsmp_steam.dll` | Steam bridge: lobbies and messages between players. | `steam-bridge/` here |
 | `dwmapi.dll`, `ue4ss/UE4SS.dll` | UE4SS v3.0.1 (experimental), the script loader the mod runs on. Not part of this project. | https://github.com/UE4SS-RE/RE-UE4SS |
 | `ue4ss/UE4SS-settings.ini`, `ue4ss/Mods/mods.txt` and UE4SS's own stock mods | UE4SS's configuration and bundled Lua mods. | UE4SS |
@@ -66,6 +67,7 @@ To remove the mod, delete `dwmapi.dll` and the `ue4ss` folder from that director
 
 ```
 mod/Scripts/       the mod (Lua): core.lua, net.lua, ui.lua, coop/*.lua ...
+mod/assets/        pictures the mod loads (scratch tickets)
 steam-bridge/      the bridge (Rust): Cargo.toml, Cargo.lock, src/lib.rs
 installer/         Install.bat, Install.ps1, INSTALL.txt
 ```

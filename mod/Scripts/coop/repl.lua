@@ -144,7 +144,8 @@ end
 -- components. Returns the object that holds the variable and the variable's own name.
 local function resolve(obj, name)
     local comp, var = name:match("^([%w_]+)%.([%w_]+)$")
-    if not comp then return obj, name end
+    -- (a dead object stays out: reading its class is a fault no pcall catches)
+    if not comp then return valid(obj) and obj or nil, name end
     local ok, sub = pcall(function() return obj[comp] end)
     if ok and valid(sub) then return sub, var end
     return nil, var
@@ -197,6 +198,7 @@ end
 
 -- Imports text into one variable exactly as given (also works for maps and sets).
 function Repl.importRaw(obj, name, text)
+    if not valid(obj) then return false end
     local entry = propsOf(obj)[name:lower()]
     if not entry then return false end
     return pcall(function() entry.prop:ImportText(text, entry.prop:ContainerPtrToValuePtr(obj), 2, obj) end)

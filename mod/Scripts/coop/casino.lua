@@ -1360,7 +1360,7 @@ function Casino.enter()
     end)
     pcall(function() player.HUD:SetVisibility(1) end)
     Avatar.noEmoteView, Avatar.sendZ = true, SIT - EYE
-    pcall(Avatar.setEmote, 3)
+    pcall(Avatar.setEmote, Avatar.TABLE_SEAT)
     Casino.seated = true
     scr.onClose = function() if Casino.seated then Casino.leave() end end
     g = { state = "bet" }

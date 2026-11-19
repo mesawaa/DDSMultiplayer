@@ -196,7 +196,7 @@ end)
 
 M.Core, M.Net, M.ui, M.XP, M.host, M.leave, M.statusText = Core, Net, ui, XP, host, leave, statusText
 
-for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds" }) do
+for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.third", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds", "coop.lotto" }) do
     local ok, mod = pcall(require, name)
     if ok then
         M[name:match("[^.]+$")] = mod

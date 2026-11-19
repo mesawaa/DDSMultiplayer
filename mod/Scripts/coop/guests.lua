@@ -302,7 +302,7 @@ end
 function Guests.ready() return World.role ~= "guest" or Guests.received end
 -- What other modules keep in that record (the wall quest's step, the Shady Comm picture)
 -- stays when the record is written anew as a whole (coop/look.lua does).
-Guests.kept = { "wq", "pic" }
+Guests.kept = { "wq", "pic", "fl" }
 function Guests.setSelf(record)
     local old = Guests.self()
     if type(record) == "table" and type(old) == "table" then

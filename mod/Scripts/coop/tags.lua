@@ -1409,4 +1409,65 @@ function Tags.paintOf(name, strokes)
     return slot.mid
 end
 
+-- A picture painted once by `paint(canvas, white, size, clear)`: `white` is the plain texture
+-- to stamp rectangles with, `clear` the colour that, drawn opaque, leaves nothing. (The
+-- emote wheel's ring, coop/emote.lua.)
+function Tags.canvasPicture(key, paint)
+    if not canPaint() then return nil end
+    key = "canvas:" .. tostring(key)
+    local slot = slotFor(key)
+    if not slot then return nil end
+    if slot.text ~= key then
+        slot.text = key
+        startRender(slot, {})
+        local _, player = world()
+        local ok, e = pcall(withCanvas, player, slot.rt, function(cv) paint(cv, white, SIZE, CLEAR) end)
+        if not ok then log("Tags: picture %s: %s", key, tostring(e)) end
+    end
+    return slot.rt
+end
+
+-- A round cut of a square picture that is still being made (an entry of coop/thumbs.lua:
+-- { rt, done }): the texture is empty until the picture is there, then holds it with
+-- everything outside the circle taken away (strips of "no paint", as the eraser does).
+local rounds = {}
+function Tags.roundPicture(key, source)
+    if not canPaint() or type(source) ~= "table" then return nil end
+    key = "round:" .. tostring(key)
+    local slot = slotFor(key)
+    if not slot then return nil end
+    if slot.text ~= key then
+        slot.text = key
+        startRender(slot, {})
+        rounds[#rounds + 1] = { key = key, slot = slot, source = source }
+    end
+    return slot.rt
+end
+
+Core.every(0.1, function()
+    if not live() or #rounds == 0 then return end
+    local w, player = world()
+    for i = #rounds, 1, -1 do
+        local r = rounds[i]
+        if not w or w.slots[r.key] ~= r.slot then
+            table.remove(rounds, i)
+        elseif r.source.done then
+            table.remove(rounds, i)
+            pcall(withCanvas, player, r.slot.rt, function(cv)
+                local one = { R = 1, G = 1, B = 1, A = 1 }
+                cv:K2_DrawTexture(r.source.rt, { X = 0, Y = 0 }, { X = SIZE, Y = SIZE }, { X = 0, Y = 0 }, { X = 1, Y = 1 }, one, 0, 0, { X = 0.5, Y = 0.5 })
+                local radius, n = SIZE / 2 - 4, 128
+                local h = SIZE / n
+                for j = 0, n - 1 do
+                    local dy = -SIZE / 2 + (j + 0.5) * h
+                    local half = math.abs(dy) < radius and math.sqrt(radius * radius - dy * dy) or 0
+                    local side = SIZE / 2 - half
+                    cv:K2_DrawTexture(white, { X = 0, Y = j * h }, { X = side, Y = h }, { X = 0, Y = 0 }, { X = 1, Y = 1 }, CLEAR, 0, 0, { X = 0.5, Y = 0.5 })
+                    cv:K2_DrawTexture(white, { X = SIZE - side, Y = j * h }, { X = side, Y = h }, { X = 0, Y = 0 }, { X = 1, Y = 1 }, CLEAR, 0, 0, { X = 0.5, Y = 0.5 })
+                end
+            end)
+        end
+    end
+end)
+
 return Tags

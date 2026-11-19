@@ -311,8 +311,44 @@ function Screen.open()
         lib:SetInputMode_GameAndUIEx(pc, W, 0, false)
         pc.bShowMouseCursor = true
     end)
+    s.mouseAt = os.clock() + 0.5
     Screen.current = s
     return s
+end
+
+-- The mouse belongs to the open screen. Two things take it away without the screen
+-- knowing: switching to another program and back (the game comes back looking around with
+-- the mouse, no pointer), and the game's own windows (inventory, phone, map), which hand
+-- the mouse to the game when they close. So the screen takes the mouse again: at once when
+-- the pointer is found switched off, and otherwise twice a second, which costs nothing when
+-- nothing was lost. Never while a mouse button is down (taking the mouse lets go of a
+-- pressed button and of the held look-around at the card table) and never while one of the
+-- game's windows is up (those need the mouse themselves).
+local GAME_WINDOWS = { "inventoryOpen", "phoneUp", "computerOpen", "mapOpen", "saveScreenOpen", "isTrading" }
+local LMB, RMB = nil, nil
+
+local function keepMouse(s, anyDown)
+    local player = World.player()
+    if not player or World.gone then return end
+    local pc = player:GetController()
+    if not valid(pc) then return end
+    for _, f in ipairs(GAME_WINDOWS) do
+        if player[f] == true then
+            s.mouseAt = 0        -- (taken back the moment that window closes)
+            return
+        end
+    end
+    local now = os.clock()
+    local lost = pc.bShowMouseCursor ~= true
+    if not lost and now < (s.mouseAt or 0) then return end
+    if anyDown then return end
+    LMB = LMB or { KeyName = FName("LeftMouseButton") }
+    RMB = RMB or { KeyName = FName("RightMouseButton") }
+    if pc:IsInputKeyDown(LMB) == true or pc:IsInputKeyDown(RMB) == true then return end
+    s.mouseAt = now + 0.5
+    library():SetInputMode_GameAndUIEx(pc, s.widget, 0, false)
+    pc.bShowMouseCursor = true
+    if lost then s.mouseTaken = (s.mouseTaken or 0) + 1 end
 end
 
 local function fire(b)
@@ -349,14 +385,16 @@ Core.onTick(function()
             if s.topOf(b.widget) ~= "screen" then s.forget(i) end
         end
     end
-    local pressed = nil
+    local pressed, anyDown = nil, false
     for _, b in ipairs(s.buttons) do
         local ok, down = pcall(function() return b.widget.btnShow:IsPressed() end)
         if ok then
             if down and not b.down then pressed = pressed or b end
+            if down then anyDown = true end
             b.down = down
         end
     end
+    if not s.ownMouse then pcall(keepMouse, s, anyDown) end
     if pressed then fire(pressed) end
 end)
 

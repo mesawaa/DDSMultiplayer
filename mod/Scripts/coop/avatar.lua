@@ -41,25 +41,74 @@ local STAND_ANIM = "/Game/Animations/CitizenMale_MOB1_Stand_Relaxed_L_90_IPC1.Ci
 local JOINT_CLASS = "/Game/Skeletal/NPC/EddieReady/Props/ballenaCigarBP.ballenaCigarBP_C"
 local WISP_FX = SMOKE_FX
 local FLAG_PHONE, FLAG_LIGHT, FLAG_CALL, FLAG_SMOKE = 1, 2, 4, 8
+local FLAG_STRUT = 128      -- (16..64 are the bag)
+-- The strut: a walk of the game's citizens (listening to music), played instead of the
+-- normal walk while the player has it switched on (coop/emote.lua: Caps Lock or the wheel).
+local STRUT_ANIM = "/Game/Animations/CitizenMale_Walk_08_Listen_Music_Loop_IP.CitizenMale_Walk_08_Listen_Music_Loop_IP"
+-- The backpack a player wears travels in the next three bits of the flags: a number of
+-- BAGS, 0 for none (and for a bag not in the list). Versions that do not know it look at
+-- their own bits only. The models are the game's own worn backpacks, the ones its
+-- inventory screen hangs on the figure there.
+local BAG_SHIFT, BAG_MASK = 4, 7
+local BAG_DIR = "/Game/GUI/Inventory/InventoryCharacter/"
+-- Each may have its own `scale`, `loc`, `locFemale`, `rot` and `rotFemale` (otherwise
+-- Avatar.tune's). The duffle bag is the game's own mesh (the worn model the game has for it
+-- is small and hangs off the back). Men carry it level at the hips, handles up and turned
+-- a little outward; women across the back at 45 degrees, the way a slung rifle hangs, its
+-- dark underside outward.
+-- The suitcase has no worn model in the game: its own mesh, carried in the right hand
+-- (`hand`: put away while that hand is busy with the phone or an emote).
+local BAGS = {
+    { item = "ITEM-SMALL-BACKPACK", class = "backpackRepr_Small", scale = 1.3 },
+    { item = "ITEM-MEDIUM-BACKPACK", class = "backpackRepr_Medium", scale = 1.25 },
+    { item = "ITEM-LARGE-BACKPACK", class = "backpackRepr_Large", scale = 1.25 },
+    { item = "ITEM-DUFFLEBAG", mesh = "/Game/Interactive/Backpacks/duffleBag.duffleBag", scale = 0.76,
+        rot = { Pitch = 79.26, Yaw = 6.76, Roll = 158.77 }, loc = { X = -48.54, Y = -28.62, Z = 0.95 },
+        rotFemale = { Pitch = 44.27, Yaw = 3.83, Roll = 90.98 }, locFemale = { X = -10.36, Y = -31.84, Z = 0.53 } },
+    -- The briefcase hangs upright from the fingers whatever the wrist does (the women's
+    -- standing animation turns the wrist: a case fixed to the hand lay across her forearm).
+    -- Its rotation is the world's, its handle is kept at the middle finger's knuckle (see
+    -- hangBag); the model's origin is the middle of its bottom, `drop` below the grip.
+    { item = "ITEM-SUITCASE", mesh = "/Game/Interactive/Backpacks/Suitcase2.Suitcase2", hand = true, bone = "middle_01_r", scale = 0.8,
+        hang = { drop = 33, out = 2, down = 2 } },
+}
+Avatar.BAGS = BAGS
+local BAG_OF = {}
+for i, b in ipairs(BAGS) do BAG_OF[b.item] = i end
 
 -- Emotes, by number (the number is what travels). All are the game's own citizen
--- animations; a few are single poses.
+-- animations; a few are single poses. The seated ones were made for somebody behind a desk:
+-- `yaw` turns the figure so that it faces where the player faces, `back` and `side` put its
+-- hips about 70 units behind where the player stands: backed against the hideout couch the
+-- player stops 32 in front of the cushion edge, and the hips land 38 into the seat.
 Avatar.EMOTES = {
     { name = "Talk", anim = "/Game/CityAnimations/Retargeted/Talking_3.Talking_3" },
     { name = "Hands up", anim = "/Game/Animations/PozyEndgame/Retarget/NPC_PoseExport_Anim_root_DeadDealer02.NPC_PoseExport_Anim_root_DeadDealer02" },
-    { name = "Sit", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_laptop.shopkeeper_02_desk_laptop" },
-    { name = "Lounge", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_04_jay.shopkeeper_04_jay" },
-    { name = "Smoke break", anim = "/Game/Animations/NoweMocap/NaCitizen/Sitting_waiting.Sitting_waiting", smoke = true },
+    { name = "Sit", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_hands.shopkeeper_02_desk_hands", back = 90, side = -5, yaw = 6 },
+    { name = "Lounge", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_04_jay.shopkeeper_04_jay", back = 81, side = 34, yaw = -77 },
+    -- (its hips are on the standing spot and 8 lower than Sit's: moved back 70, raised 8)
+    { name = "Smoke break", anim = "/Game/Animations/NoweMocap/NaCitizen/Sitting_waiting.Sitting_waiting", smoke = true, back = 70, side = 0, yaw = 2, up = 8 },
     { name = "Crouch", anim = "/Game/Animations/Sebiks_MOB1_Crouch_Idle_V2_IPC.Sebiks_MOB1_Crouch_Idle_V2_IPC" },
     { name = "Play dead", anim = "/Game/Animations/PozyEndgame/Retarget/NPC_PoseExport_Anim_root_DeadDealer01.NPC_PoseExport_Anim_root_DeadDealer01" },
-    { name = "Strut", anim = "/Game/Animations/CitizenMale_Walk_08_Listen_Music_Loop_IP.CitizenMale_Walk_08_Listen_Music_Loop_IP" },
+    -- (not an emote: switches the strut walk on and off; kept last so the numbers above stay)
+    { name = "Strut", strut = true },
 }
+-- Poses that are not on the wheel, by numbers the wheel never reaches. The card table's
+-- seat: the figure sits exactly where the player is (the table's seats were measured for
+-- this animation without any shift; the wheel's Sit moves the figure back onto a seat).
+Avatar.TABLE_SEAT = 50
+local POSES = {
+    [50] = { name = "Table seat", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_laptop.shopkeeper_02_desk_laptop" },
+}
+local function emoteOf(id) return Avatar.EMOTES[id] or POSES[id] end
 Avatar.localEmote = 0      -- the emote our own player is doing (0 = none)
 Avatar.STAND_ANIM = STAND_ANIM
 Avatar.smokeUntil = 0      -- our own player is smoking until this time
+Avatar.strut = false       -- our own player walks with the strut
 
 function Avatar.setEmote(id)
-    Avatar.localEmote = Avatar.EMOTES[id] and id or 0
+    local e = emoteOf(id)
+    Avatar.localEmote = (e and not e.strut) and id or 0
 end
 
 -- Settings that can be tuned while looking at the result (also from the dev console).
@@ -73,6 +122,8 @@ Avatar.tune = {
     callLoc = { X = 0, Y = 0, Z = 0 }, callRot = { Pitch = 0, Yaw = 0, Roll = 90 },
     standFraction = 0.37,      -- where in the walking-and-texting loop (0..1) a standing player is held: feet together
     walkSpeed = 160,           -- units per second the loop was made for
+    strutSpeed = 175,          -- the same for the strut loop (its feet measured against the texting loop's)
+    strutMaxSpeed = 250,       -- the player's top speed while strutting (the game's walk is about 900; 190 was too slow)
     femaleJogFrom = 260,       -- a woman faster than this jogs (her blueprint has a walk only)
     femaleJogSpeed = 380,      -- units per second the women's jog was made for
     lightForward = 40, lightUp = 45,
@@ -81,9 +132,13 @@ Avatar.tune = {
     -- It sits a little in front of the hands: any closer and the palm burns out white.
     glowForward = 62, glowUp = 40, glowIntensity = 900, glowRadius = 200,
     -- The joint, relative to the bone it hangs from.
-    jointBone = "head", jointLoc = { X = 0.2, Y = 9.5, Z = 0 }, jointRot = { Pitch = 0, Yaw = 0, Roll = 90 }, jointThin = 0.38, jointLong = 1.1,
+    jointBone = "head", jointLoc = { X = 0.2, Y = 9.5, Z = 0 }, jointRot = { Pitch = 0, Yaw = 0, Roll = 90 }, jointThin = 0.65, jointLong = 1.35,
     -- The wisp of smoke that rises from its tip.
     wispFx = WISP_FX, wispScale = 0.07, wispAt = 7.3,
+    -- The backpack: where the game's inventory figure has its "backpackSocket" (same bone,
+    -- same place on the citizens' skeletons). The women's back is nearer to the bone.
+    bagBone = "spine_03", bagLoc = { X = 0, Y = -18.04, Z = 0 }, bagLocFemale = { X = 0, Y = -12, Z = 0 },
+    bagRot = { Pitch = 0, Yaw = -80, Roll = 90 }, bagScale = 1.0,
 }
 
 -- Looking an asset up takes a few milliseconds. While several figures are built in one go
@@ -354,6 +409,10 @@ local function build(look, pos, name)
         end
         for _, partName in ipairs(look.parts) do
             -- a part may come in another colour too ("Hats_Hair/SK_ma_hat_cap_01#MI_hat_cap_01_darkblue")
+            -- ("MESH!word": of that mesh only the pieces whose material has the word in its
+            -- name are shown, e.g. an outfit's apron over another outfit)
+            local only = nil
+            partName, only = tostring(partName):match("^([^!]+)!?(.*)$")
             local partMesh, partColour = splitBody(partName)
             local m = mesh(partMesh)
             if not m then log("Puppet part %s is not available", partName) end
@@ -366,6 +425,16 @@ local function build(look, pos, name)
                 part:K2_AttachToActor(body, FName("None"), 2, 2, 2, false)
                 p.followers[#p.followers + 1] = part.SkeletalMeshComponent
                 if partColour then pcall(applyColour, part.SkeletalMeshComponent, partColour) end
+                if only and only ~= "" then
+                    local c = part.SkeletalMeshComponent
+                    for i = 0, c:GetNumMaterials() - 1 do
+                        local cur = c:GetMaterial(i)
+                        local n = valid(cur) and cur:GetFName():ToString():lower() or ""
+                        if not n:find(only, 1, true) then
+                            for lod = 0, 3 do pcall(function() c:ShowMaterialSection(i, false, lod) end) end
+                        end
+                    end
+                end
             end
         end
         applySkin(p, look.face or look.parts[1])
@@ -407,6 +476,8 @@ local function partsOf(l)
         if l.hair and l.hair ~= "" and not Avatar.hidesHair(l.hat) then parts[#parts + 1] = l.hair end
         if type(l.hat) == "string" and l.hat ~= "" then parts[#parts + 1] = l.hat end
         if type(l.glasses) == "string" and l.glasses ~= "" then parts[#parts + 1] = l.glasses end
+        -- (a piece of another outfit worn over this one: "MESH!word", see build)
+        if type(l.over) == "string" and l.over ~= "" then parts[#parts + 1] = l.over end
         return { body = l.body, parts = parts, face = face }
     end
     local parts = { l.head or "SK_ma_head_01", "Basebody/SK_ma_hands_average" }
@@ -477,6 +548,7 @@ local function seatJoint(p)
     p.smoke:K2_SetActorRelativeLocation(t.jointLoc, false, {}, true)
     p.smoke:K2_SetActorRelativeRotation(t.jointRot, false, {}, true)
     -- the game's prop is a fat cigar; across its length (its Z) it is thinned to a cigarillo
+    -- (not thinner: from where the emote view stands a real joint's width is under a pixel)
     p.smoke:SetActorRelativeScale3D({ X = t.jointThin, Y = t.jointThin, Z = t.jointLong })
 end
 
@@ -536,12 +608,124 @@ function Avatar.testPose(path, fraction)
     return anim ~= nil
 end
 
+-- The backpack on a figure's back.
+-- A bag that hangs (BAGS `hang`): upright, turned with the body, its grip at the bone.
+-- The bone turns with the wrist, so the offset to the bag's origin is worked out again in
+-- the bone's own axes every tick (from the bone's rotation of the frame before).
+local function hangBag(p)
+    local b = BAGS[p.bagCode]
+    local h = b and b.hang
+    if not h or not p.bag or p.bagAway then return end
+    local r = p.comp:GetSocketRotation(FName(b.bone))
+    local yaw = p.yaw or 0
+    local ry = math.rad(yaw)
+    -- (world offset: `out` to the figure's right, `drop` + `down` straight down)
+    local vx, vy, vz = -math.sin(ry) * h.out, math.cos(ry) * h.out, -(h.drop + h.down)
+    local cp, sp = math.cos(math.rad(r.Pitch)), math.sin(math.rad(r.Pitch))
+    local cy, sy = math.cos(math.rad(r.Yaw)), math.sin(math.rad(r.Yaw))
+    local cr, sr = math.cos(math.rad(r.Roll)), math.sin(math.rad(r.Roll))
+    local X = { cp * cy, cp * sy, sp }
+    local Y = { sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp }
+    local Z = { -(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp }
+    local function dot(a) return a[1] * vx + a[2] * vy + a[3] * vz end
+    p.bag:K2_SetActorRelativeLocation({ X = dot(X), Y = dot(Y), Z = dot(Z) }, false, {}, true)
+    if not p.bagYaw or math.abs(((yaw - p.bagYaw + 180) % 360) - 180) > 0.3 then
+        p.bagYaw = yaw
+        p.bag:K2_SetActorRelativeRotation({ Pitch = 0, Yaw = yaw, Roll = 0 }, false, {}, true)
+    end
+end
+
+local function seatBag(p)
+    if not p.bag or not valid(p.bag) then return end
+    local t, b = Avatar.tune, BAGS[p.bagCode] or {}
+    local scale = b.scale or t.bagScale
+    p.bag:K2_AttachToComponent(p.comp, FName(b.bone or t.bagBone), 2, 2, 2, false)
+    if b.hang then
+        p.bag.RootComponent:SetAbsolute(false, true, false)
+        p.bagYaw = nil
+        p.bag:SetActorRelativeScale3D({ X = scale, Y = scale, Z = scale })
+        hangBag(p)
+        return
+    end
+    p.bag:K2_SetActorRelativeLocation(p.female and (b.locFemale or t.bagLocFemale) or (b.loc or t.bagLoc), false, {}, true)
+    p.bag:K2_SetActorRelativeRotation(p.female and b.rotFemale or b.rot or t.bagRot, false, {}, true)
+    p.bag:SetActorRelativeScale3D({ X = scale, Y = scale, Z = scale })
+end
+
+-- Gives a figure the backpack number `code` of BAGS (0 or unknown: none).
+local function wearBag(p, code)
+    code = BAGS[code] and code or 0
+    if (p.bagCode or 0) == code then return end
+    p.bagCode = code
+    if p.bag then
+        local old = p.bag
+        p.bag = nil
+        for i = #p.actors, 1, -1 do
+            if p.actors[i] == old then table.remove(p.actors, i) end
+        end
+        pcall(function() if valid(old) then old:K2_DestroyActor() end end)
+    end
+    if code == 0 then return end
+    local b = BAGS[code]
+    local world, at = p.body:GetWorld(), { X = p.x, Y = p.y, Z = p.z }
+    local bag
+    if b.mesh then
+        local m = asset(b.mesh)
+        if not m then error("model " .. b.mesh .. " is not available") end
+        bag = world:SpawnActor(StaticFindObject("/Script/Engine.StaticMeshActor"), at, { Pitch = 0, Yaw = 0, Roll = 0 })
+        if not valid(bag) then error("model " .. b.mesh .. " could not be made") end
+        bag:SetMobility(2)
+        bag.StaticMeshComponent:SetStaticMesh(m)
+    else
+        local classPath = BAG_DIR .. b.class .. "." .. b.class .. "_C"
+        local class = StaticFindObject(classPath)
+        if not valid(class) then
+            pcall(function() LoadAsset(BAG_DIR .. b.class) end)
+            class = StaticFindObject(classPath)
+        end
+        if not valid(class) then error("backpack model " .. b.class .. " is not available") end
+        bag = world:SpawnActor(class, at, { Pitch = 0, Yaw = 0, Roll = 0 })
+        if not valid(bag) then error("backpack model " .. b.class .. " could not be made") end
+    end
+    bag:SetActorEnableCollision(false)
+    p.actors[#p.actors + 1] = bag
+    p.bag, p.bagAway = bag, false
+    seatBag(p)
+end
+
+-- (also for stand-ins) A failure is logged once per figure and leaves it without a bag.
+function Avatar.setBag(p, code)
+    if not p or not valid(p.body) then return end
+    local ok, e = pcall(wearBag, p, code or 0)
+    if not ok and not p.bagFailed then
+        p.bagFailed = true
+        log("Could not give a figure its backpack: %s", tostring(e))
+    end
+end
+
+-- The number (of BAGS) of the backpack our own player wears; looked up once a second.
+local ownBagCode, ownBagAt = 0, -10
+function Avatar.ownBag()
+    local now = os.clock()
+    if now - ownBagAt >= 1 then
+        ownBagAt = now
+        local code = 0
+        pcall(function()
+            local player = World.player()
+            if player then code = BAG_OF[player.InventoryComponent.CurBackpackID:ToString()] or 0 end
+        end)
+        ownBagCode = code
+    end
+    return ownBagCode
+end
+
 -- Re-applies Avatar.tune to phones that already exist (used while adjusting).
 function Avatar.applyTune()
     local t = Avatar.tune
     for _, set in pairs(Avatar.puppets) do
         local p = set.player
         if p then seatPhone(p, p.pose) end
+        if p then seatBag(p) end
         if p then seatJoint(p) end
         if p then
             p.standing = false
@@ -589,19 +773,33 @@ local function buildTorch(p)
     end)
 end
 
+-- Where a figure's body goes: where the player is and faces, moved and turned by what the
+-- emote it plays asks for (`back` and `side` in units from the standing spot, `yaw` degrees).
+local function bodyPlace(p, z)
+    local back, side = p.offBack or 0, p.offSide or 0
+    local yaw = math.rad(p.yaw)
+    return { X = p.x - math.cos(yaw) * back - math.sin(yaw) * side, Y = p.y - math.sin(yaw) * back + math.cos(yaw) * side, Z = z + (p.offUp or 0) },
+        { Pitch = 0, Yaw = p.yaw + MESH_YAW + (p.offYaw or 0), Roll = 0 }
+end
+Avatar.bodyPlace = bodyPlace
+
 -- Shows or hides the phone and the torch, and switches between the normal walk, the
 -- looking-at-the-phone animation and the talking-on-the-phone animation.
 local function holdThings(p)
     local flags = p.flags or 0
     local wantLight = flags & FLAG_LIGHT ~= 0
     local pose = nil
-    local emote = Avatar.EMOTES[p.emote or 0]
+    local emote = emoteOf(p.emote or 0)
     if flags & FLAG_CALL ~= 0 then
         pose = "call"
     elseif emote then
         pose = "emote" .. tostring(p.emote)
     elseif wantLight or flags & FLAG_PHONE ~= 0 then
         pose = "phone"
+    elseif flags & FLAG_STRUT ~= 0 then
+        -- (only while walking; standing still is the normal standing)
+        local speed = Avatar.tune.testSpeed or p.speed or 0
+        if speed > 25 or (p.pose == "strut" and speed > 8) then pose = "strut" end
     end
     if pose ~= p.pose then
         if pose and not p.phone and not p.phoneFailed then
@@ -616,7 +814,8 @@ local function holdThings(p)
         local anim = nil
         if pose == "call" then anim = asset(CALL_ANIM)
         elseif pose == "phone" then anim = asset(PHONE_ANIM)
-        elseif emote then anim = asset(emote.anim) end
+        elseif pose == "strut" then anim = asset(STRUT_ANIM)
+        elseif emote and emote.anim then anim = asset(emote.anim) end
         if anim then
             setSkeleton(p, true)
             p.comp:PlayAnimation(anim, true)
@@ -631,6 +830,31 @@ local function holdThings(p)
         end
         p.pose = pose
         if holdsPhone then seatPhone(p, pose) end
+        -- An emote may stand the figure elsewhere than the player (see Avatar.EMOTES). The
+        -- own figure only while it is held where it stands (otherwise it hangs on the player).
+        local shift = (pose and pose:sub(1, 5) == "emote" and emote) or {}
+        local back, side, turn, up = shift.back or 0, shift.side or 0, shift.yaw or 0, shift.up or 0
+        if back ~= (p.offBack or 0) or side ~= (p.offSide or 0) or turn ~= (p.offYaw or 0) or up ~= (p.offUp or 0) then
+            local wasUp = p.offUp or 0
+            p.offBack, p.offSide, p.offYaw, p.offUp = back, side, turn, up
+            if not p.own then
+                local at, rot = bodyPlace(p, p.z + FEET_OFFSET)
+                p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
+            elseif p.heldStill then
+                local at, rot = bodyPlace(p, p.body:K2_GetActorLocation().Z - wasUp)
+                p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
+            end
+        end
+    end
+    local bag = (flags >> BAG_SHIFT) & BAG_MASK
+    if bag ~= (p.bagCode or 0) then Avatar.setBag(p, bag) end
+    -- (a bag carried in the hand is put away while the hands do something else)
+    if p.bag and BAGS[p.bagCode] and BAGS[p.bagCode].hand then
+        local away = p.pose ~= nil or (flags & FLAG_STRUT ~= 0)
+        if away ~= (p.bagAway == true) then
+            p.bagAway = away
+            pcall(function() if valid(p.bag) then p.bag:SetActorHiddenInGame(away) end end)
+        end
     end
     -- Smoke: after a joint, and for as long as the smoke break lasts.
     local wantSmoke = flags & FLAG_SMOKE ~= 0
@@ -659,6 +883,10 @@ local function holdThings(p)
                 end
             end)
         end
+    end
+    if p.phoneAnim and pose == "strut" then
+        local speed = Avatar.tune.testSpeed or p.speed or 0
+        p.comp:SetPlayRate(math.max(0.4, math.min(2.5, speed / Avatar.tune.strutSpeed)))
     end
     if p.phoneAnim and pose == "phone" then
         -- The loop is a walk: run it at the player's pace, hold one frame when standing.
@@ -721,13 +949,13 @@ local function move(p, dt, camera)
     local dx, dy, dz = p.tx - p.x, p.ty - p.y, p.tz - p.z
     local turn = angleDelta(p.yaw, p.tyaw)
     local d2 = dx * dx + dy * dy + dz * dz
-    local moving = d2 > 0.25 or math.abs(turn) > 0.3
+    local moving = not p.own and (d2 > 0.25 or math.abs(turn) > 0.3)
     if moving then
         if d2 > 600 * 600 then k = 1 end   -- teleport, do not glide
         p.x, p.y, p.z = p.x + dx * k, p.y + dy * k, p.z + dz * k
         p.yaw = p.yaw + turn * k
-        p.body:K2_SetActorLocationAndRotation({ X = p.x, Y = p.y, Z = p.z + FEET_OFFSET },
-            { Pitch = 0, Yaw = p.yaw + MESH_YAW, Roll = 0 }, false, {}, true)
+        local at, rot = bodyPlace(p, p.z + FEET_OFFSET)
+        p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
     end
     local now = p.ticks % 10 == 0
     if p.female and not p.phoneAnim then
@@ -768,6 +996,9 @@ local function move(p, dt, camera)
                 log("Showing what a player holds failed: %s", tostring(e))
             end
         end
+    end
+    if p.bag and p.bagCode and BAGS[p.bagCode] and BAGS[p.bagCode].hang and not p.bagAway then
+        pcall(hangBag, p)
     end
     if p.label and (moving or p.ticks % 3 == 0) and valid(p.label) then
         local face = math.deg(math.atan(camera.Y - p.y, camera.X - p.x))
@@ -834,16 +1065,18 @@ local function refreshPursuers(loc)
     for i = 1, math.min(#found, MAX_POLICE) do pursuers[i] = found[i] end
 end
 
-local function describe(actor)
+local function describe(actor, own)
     local loc = actor:K2_GetActorLocation()
     if actor == World.player() then loc.Z = loc.Z + (Avatar.sendZ or 0) end
     local rot = actor:K2_GetActorRotation()
+    local yaw = rot.Yaw
+    if own and Avatar.sendYaw then yaw = Avatar.sendYaw end
     local vel = actor:GetVelocity()
-    return string.format("%.0f,%.0f,%.0f,%.0f,%.0f", loc.X, loc.Y, loc.Z, rot.Yaw, math.sqrt(vel.X * vel.X + vel.Y * vel.Y)), loc
+    return string.format("%.0f,%.0f,%.0f,%.0f,%.0f", loc.X, loc.Y, loc.Z, yaw, math.sqrt(vel.X * vel.X + vel.Y * vel.Y)), loc
 end
 
 -- What our own player has in hand, and where the view points up or down.
-local function holding(player)
+local function held(player)
     local flags, pitch = 0, 0
     pcall(function()
         if player.phoneUp == true then flags = flags | FLAG_PHONE end
@@ -855,8 +1088,15 @@ local function holding(player)
         pitch = player:GetControlRotation().Pitch
         if pitch > 180 then pitch = pitch - 360 end
     end)
-    local emote = Avatar.EMOTES[Avatar.localEmote or 0]
+    local emote = emoteOf(Avatar.localEmote or 0)
     if os.clock() < (Avatar.smokeUntil or 0) or (emote and emote.smoke) then flags = flags | FLAG_SMOKE end
+    if Avatar.strut then flags = flags | FLAG_STRUT end
+    flags = flags | (Avatar.ownBag() << BAG_SHIFT)
+    return flags, pitch
+end
+
+local function holding(player)
+    local flags, pitch = held(player)
     return string.format(",%d,%.0f,%d", flags, pitch, Avatar.localEmote or 0)
 end
 
@@ -886,7 +1126,7 @@ Core.onTick(function(dt)
     ownTurn = not ownTurn
     local line, loc = lastLine, lastLoc
     if ownTurn or not loc or #pursuers > 0 then
-        line, loc = describe(player)
+        line, loc = describe(player, true)
         line = line .. holding(player)
         if os.clock() >= pursuersDue then
             pursuersDue = os.clock() + 3
@@ -1140,6 +1380,106 @@ function Avatar.moveStandIn(p, x, y, z, yaw)
 end
 
 function Avatar.destroyStandIn(p) destroy(p) end
+
+-- The figure of our own player, for the third-person view (coop/third.lua): dressed like
+-- the player, hung on the player's own actor (the engine moves it, every frame), animated
+-- like the figures of the other players from what the player does.
+local CROUCH_ANIM = "/Game/Animations/Sebiks_MOB1_Crouch_Idle_V2_IPC.Sebiks_MOB1_Crouch_Idle_V2_IPC"
+
+local function seatOwn(p, player)
+    local l = player:K2_GetActorLocation()
+    local yaw = player:K2_GetActorRotation().Yaw
+    local half = 90
+    pcall(function() half = player.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+    p.half = half
+    p.body:K2_SetActorLocationAndRotation({ X = l.X, Y = l.Y, Z = l.Z - half }, { Pitch = 0, Yaw = yaw + MESH_YAW, Roll = 0 }, false, {}, true)
+    p.body:K2_AttachToActor(player, FName("None"), 1, 1, 1, false)
+    p.x, p.y, p.z, p.yaw = l.X, l.Y, l.Z, yaw
+end
+
+function Avatar.buildOwn(look, player)
+    local l = player:K2_GetActorLocation()
+    local p = build(partsOf(look), { x = l.X, y = l.Y, z = l.Z, yaw = player:K2_GetActorRotation().Yaw }, nil)
+    if not p then return nil end
+    p.isPlayer, p.own = true, true
+    local ok, e = pcall(seatOwn, p, player)
+    if not ok then
+        log("Own figure: %s", tostring(e))
+        destroy(p)
+        return nil
+    end
+    return p
+end
+
+-- Holds the own figure where it stands (an emote: the view turns around it), or hangs it on
+-- the player again.
+function Avatar.holdOwn(p, player, hold)
+    if not p or not valid(p.body) or (p.heldStill == true) == hold then return end
+    p.heldStill = hold
+    if hold then
+        p.body:K2_DetachFromActor(1, 1, 1)
+    else
+        seatOwn(p, player)
+    end
+end
+
+function Avatar.showOwn(p, show)
+    if not p or (p.shown ~= false) == show then return end
+    p.shown = show
+    for _, a in ipairs(p.actors) do
+        pcall(function() if valid(a) then a:SetActorHiddenInGame(not show) end end)
+    end
+    if show then
+        -- (what was put away stays away)
+        p.pose, p.torchShown, p.smoking, p.bagAway = false, nil, nil, nil
+        pcall(function() if p.phone and valid(p.phone) then p.phone:SetActorHiddenInGame(true) end end)
+        pcall(function() if p.smoke and valid(p.smoke) then p.smoke:SetActorHiddenInGame(true) end end)
+        pcall(function() if p.wisp and valid(p.wisp) then p.wisp:SetActorHiddenInGame(true) end end)
+    end
+end
+
+function Avatar.stepOwn(p, player, dt)
+    if not p or not valid(p.body) then return false end
+    local l = player:K2_GetActorLocation()
+    local v = player:GetVelocity()
+    local flags, pitch = held(player)
+    -- (the player's own torch is the game's; the phone is used in the first-person view)
+    flags = flags & ~FLAG_LIGHT & ~FLAG_PHONE
+    p.flags, p.pitch, p.emote = flags, pitch, Avatar.localEmote or 0
+    p.speed = math.sqrt(v.X * v.X + v.Y * v.Y)
+    if not p.heldStill then
+        p.x, p.y, p.z, p.yaw = l.X, l.Y, l.Z, player:K2_GetActorRotation().Yaw
+        -- crouching: the game lowers the capsule; the feet stay on the ground
+        local half = p.half
+        pcall(function() half = player.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+        if math.abs(half - p.half) > 0.5 then
+            p.half = half
+            p.body:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = l.Z - half }, false, {}, true)
+        end
+    end
+    local crouch = false
+    pcall(function() crouch = player.isCrouching == true end)
+    if p.emote ~= 0 or flags & FLAG_CALL ~= 0 then crouch = false end
+    if crouch ~= (p.crouched == true) then
+        p.crouched = crouch
+        if crouch then
+            local anim = asset(CROUCH_ANIM)
+            if anim then
+                setSkeleton(p, true)
+                p.comp:PlayAnimation(anim, true)
+                p.comp:SetPlayRate(1)
+                p.phoneAnim, p.jogging = true, false
+            end
+        else
+            p.phoneAnim = false
+            p.pose = false          -- (holdThings puts the right animation back)
+            toBlueprint(p)
+            p.walk = nil
+        end
+    end
+    move(p, dt, l)
+    return true
+end
 -- (for test scripts) one step of another player's figure
 function Avatar.stepPuppet(p, dt, camera) move(p, dt, camera) end
 

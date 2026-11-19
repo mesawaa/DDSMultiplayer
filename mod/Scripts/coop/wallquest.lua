@@ -151,6 +151,16 @@ local function learn(player)
     end
     mineFor = key
     log("Wall: this player is at step %d (%d paid at Olivia's)", mine.s, mine.spent)
+    -- (the HUD made its task list before this was known: once more, with the goal in it)
+    if GOAL[mine.s] then
+        Core.after(2, function()
+            if not live() or World.gone then return end
+            pcall(function()
+                local hud = World.player().HUD
+                if valid(hud) then hud:updateMiniTaskList() end
+            end)
+        end)
+    end
     return true
 end
 
@@ -260,10 +270,50 @@ Core.Hooks.add(INVENTORY .. ":renderTasklist", function(ctx)
     if not ok then log("Wall: the task list: %s", tostring(e)) end
 end)
 
+-- The list of tasks at the left of the screen (it slides in for a few seconds when a task
+-- is new, and while Tab is held): the game fills it from its task table in the HUD's
+-- updateMiniTaskList. The goal of the moment is put on top of it, as one of the game's own
+-- entries. (Never one that is "done" or "failed": such an entry writes into the game's task
+-- table by its number when it goes.)
+local HUD_CLASS = "/Game/Player/playerHUD.playerHUD_C"
+local MINI_ENTRY = "/Game/GUI/miniTaskListItem.miniTaskListItem_C"
+
+local function miniGoal(hud)
+    local goal = goalText()
+    if not goal then return end
+    local list = hud.curTaskPanel
+    if not valid(list) then return end
+    local lib = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
+    local class = StaticFindObject(MINI_ENTRY)
+    if not valid(lib) or not valid(class) then return end
+    local entry = lib:Create(hud, class, nil)
+    if not valid(entry) then return end
+    entry:Setup(FText(goal), false, 0, false, false, false)
+    local others = {}
+    for i = 0, list:GetChildrenCount() - 1 do others[#others + 1] = list:GetChildAt(i) end
+    list:ClearChildren()
+    list:AddChild(entry)
+    for _, w in ipairs(others) do if valid(w) then list:AddChild(w) end end
+end
+
+Core.Hooks.add(HUD_CLASS .. ":updateMiniTaskList", function(ctx)
+    if not live() or not goalText() then return end
+    local ok, e = pcall(function()
+        local hud = ctx:get()
+        if valid(hud) then miniGoal(hud) end
+    end)
+    if not ok then log("Wall: the HUD's task list: %s", tostring(e)) end
+end)
+
 local function refreshTaskList()
     pcall(function()
         local w = World.player().InventoryWidget
         if valid(w) then w:renderTasklist() end
+    end)
+    -- (the game's own call for a change of tasks: the list is made anew and shown a while)
+    pcall(function()
+        local hud = World.player().HUD
+        if valid(hud) then hud:updateMiniTaskList() end
     end)
 end
 
@@ -424,9 +474,9 @@ local function oliviaPart(step, spent)
             return { "Your wall is clean", to = n }, {
                 { "I saw. And who was it?", { "Amy", to = n + 1 } },
                 { "Amy. I told her I wouldn't touch her hair again until she got clean. So that's how she took it.", { "She says she's done", to = n + 2 } },
-                { "Done. Right. You know that blue in her hair? I mixed it for her back when she was my best friend. Swore nobody else would ever wear it.",
+                { "Done. Right. You know that blue in her hair? I mixed it for her back when she was my best friend. She made me swear nobody else would ever wear it. It's back on the shelves now.",
                     { "So why sell it now?", to = n + 3 } },
-                { "Because she swore to me she'd stay clean. She broke hers first. It's on the shelf.", { "Thanks, Olivia", event = true } },
+                { "Because she swore to me she'd stay clean. She broke hers first. It's on the shelf.", { "Sure. Thanks, Olivia.", event = true } },
             }
         end
     end
@@ -560,28 +610,18 @@ end
 
 -- The hair screen changes what the player has when PAY is pressed: what changed is what
 -- was paid for.
-local seen = nil          -- { hair, colour, beard } while the hair screen is open
-
-local function hairNow()
-    local s = Look.state()
-    return { hair = s.hairOff and "bald" or tostring(s.hair), colour = tostring(s.hairColour), beard = tostring(s.beard or 0) }
-end
+-- (The hair screen adds up what it took: Look.barberPaid. Shaving the head and going back
+-- to one's own hair cost nothing and count for nothing.)
+local paidSeen = nil
 
 local function tendSpending()
-    if Look.page ~= "barber" then
-        seen = nil
+    local total = tonumber(Look.barberPaid) or 0
+    if not paidSeen then
+        paidSeen = total
         return
     end
-    local now = hairNow()
-    if not seen then
-        seen = now
-        return
-    end
-    local price, paid = Look.BARBER_PRICE or {}, 0
-    if now.hair ~= seen.hair then paid = paid + (price.cut or 0) end
-    if now.colour ~= seen.colour then paid = paid + (price.colour or 0) end
-    if now.beard ~= seen.beard then paid = paid + (price.beard or 0) end
-    seen = now
+    local paid = total - paidSeen
+    paidSeen = total
     if paid > 0 and mine and mine.s == NONE then
         mine.spent = mine.spent + paid
         store()
@@ -648,8 +688,10 @@ local function spawnDialogue(player, like)
     return d
 end
 
+-- (any dialogue the mod made counts: the scratch tickets' cashing talk, coop/lotto.lua, is
+-- given to Amy as well and must never be taken for her own)
 local function isOurs(d)
-    local ok, v = pcall(function() return d.DialogueID:ToString() == OURS end)
+    local ok, v = pcall(function() return d.DialogueID:ToString():sub(1, 6) == "DDSMP-" end)
     return ok and v
 end
 
@@ -696,7 +738,7 @@ local function dropAmy()
             end
         end)
     end
-    a.root, a.rootStep, a.seeLine = nil, nil, nil
+    a.root, a.rootStep, a.seeLine, a.extraLine = nil, nil, nil, nil
 end
 
 -- How much of a thing is the drug `drug`: `name` the item, `mix` what it is made of (as text).
@@ -959,11 +1001,28 @@ local function tendAmy(player)
         if not a.root then return end
         events[a.root:GetAddress()] = amyEvent
     end
+    -- A player with a winning scratch ticket cashes it at Amy's (coop/lotto.lua): while the
+    -- talk on her is the quest's, that answer goes into it too.
+    local extra = nil
+    pcall(function()
+        local Lotto = package.loaded["coop.lotto"]
+        extra = Lotto and Lotto.cashAnswer and Lotto.cashAnswer(player) or nil
+    end)
     -- (her lines at the step "bring" differ with what she wants)
-    local face = mine.s * 2 + (mine.k and 1 or 0)
+    local face = mine.s * 2 + (mine.k and 1 or 0) + (extra and 100 or 0)
     if a.rootStep ~= face then
         local base = Repl.export(a.original, { "dialogueLines" }).dialogueLines
         local text = type(base) == "string" and extended(base, add) or nil
+        local extraLine = nil
+        if text and extra then
+            local both = extended(text, extra)
+            if both then
+                extraLine, text = #Repl.splitArray(text), both
+            else
+                log("Wall: no room in Amy's talk for the ticket answer")
+            end
+        end
+        a.extraLine = nil
         if not text or not setLines(a.root, text) then
             log("Wall: Amy's lines could not be set")
             dropAmy()
@@ -974,6 +1033,7 @@ local function tendAmy(player)
             a.root.talkerRef = a.npc
         end)
         a.rootStep = face
+        a.extraLine = extraLine
         -- (the number of the "let's see it" line: the first one after her own)
         a.seeLine, a.handFailed = mine.s == BRING and #Repl.splitArray(base) or nil, nil
     end
@@ -1160,10 +1220,30 @@ local function sprayed(at)
     if not part then return end
     pcall(showPart, player, w, part)
     mine.c = mine.c | (1 << (part - 1))
-    mine.t[#mine.t + 1] = { x = math.floor(at.X + 0.5), z = math.floor(at.Z + 0.5), w = math.floor(size + 0.5), l = math.floor(life) }
-    log("Wall: part %d of the writing is painted over (sprayed; the tag stays %d s)", part, math.floor(life))
+    -- (no tag on the paint: a spray here only covers. A tag drawn over the fresh paint
+    -- showed a moment before the paint did, and with a filled background hid it.)
+    log("Wall: part %d of the writing is painted over", part)
     if mine.c == (1 << PARTS) - 1 then advance(TELL) else store() end
 end
+
+local hideUntil, hideAt = 0, nil
+
+local function hideFresh(at)
+    for _, m in ipairs(Core.actors(MARKING) or {}) do
+        pcall(function()
+            if Core.alive(m) and m.spawned ~= true and near(m, at.X, at.Y, at.Z, 15) then m:SetActorHiddenInGame(true) end
+        end)
+    end
+end
+
+Core.onTick(function()
+    if not live() or not hideAt then return end
+    if os.clock() > hideUntil or not mine or mine.s < COVER then
+        hideAt = nil
+        return
+    end
+    hideFresh(hideAt)
+end)
 
 Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
     if not live() or not mine or mine.s ~= COVER then return end
@@ -1175,6 +1255,11 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
         at = { X = l.X, Y = l.Y, Z = l.Z }
     end)
     if not at or not onWriting(at) then return end
+    -- The game's marking of this spray must never be seen (it would show the tag for a
+    -- moment before the paint): out of sight now, and on the next ticks should it only
+    -- appear then; it is taken away below.
+    hideFresh(at)
+    hideUntil, hideAt = os.clock() + 0.4, at
     Core.after(0.1, function()
         if not live() then return end
         local ok, e = pcall(sprayed, at)
@@ -1262,12 +1347,11 @@ local function tendWall(player)
             hidePart(w, part)
         end
     end
-    if mine.s >= COVER then
-        ageTags(player, w)
-        if #w.tags > #mine.t then hideTags(w, #mine.t + 1) end
-        pcall(showTags, player, w)
-    else
-        hideTags(w)
+    -- (tags on the paint are no longer made; those an older version kept are dropped)
+    hideTags(w)
+    if #mine.t > 0 then
+        mine.t = {}
+        store()
     end
 end
 

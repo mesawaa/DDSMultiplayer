@@ -46,7 +46,10 @@ local VIEWPOINT = { x = FITTING.x - 215, y = FITTING.y }
 local REACH = 230
 local BUILD_RANGE = 3500
 
-local OLIVIA = { body = "SK_fe_clerk_01#MI_fe_casual_01_dark", head = "SK_fe_head_02_b", hair = "Hats_Hair/SK_fe_hair_03#MI_fe_hair_04", arms = true }
+-- (the long-sleeved sweater, and over it the apron of the outfit with the skirt, which she
+-- had first: under that one's rolled sleeves the forearms came through at the elbows)
+local OLIVIA = { body = "SK_fe_casual_02_a#MI_fe_casual_01_dark", head = "SK_fe_head_02_b", hair = "Hats_Hair/SK_fe_hair_03#MI_fe_hair_04", arms = true,
+    over = "SK_fe_clerk_01!apron" }
 
 -- The only things added to the room (it stays the shabby store room it is): a stool for
 -- the customer, a dresser in front of it against the brick wall, a mirror above the dresser.

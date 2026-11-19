@@ -1,12 +1,15 @@
 -- Shady Comm: who plays in this world, and a picture for each of them.
 --
 --   * Every player has a picture for Shady Comm: the game's grey figure, one of ten of the
---     game's portraits, or their own tag (the drawing, or the symbol they chose). It is
+--     game's portraits, their character's face, or their own tag (the drawing, or the
+--     symbol they chose). It is
 --     picked with PICTURE under the player's name at the top of the left column, and is
 --     kept with the player's character in the world (coop/guests.lua: per save).
---   * The player's own row at the top shows it, and their level.
+--   * The player's own row at the top shows it, and their level. The bar at the top says
+--     "Loged in as" with the player's Steam name in place of the game's made-up one.
 --   * Above the contacts stands PLAYERS: everybody else who has a character in this world,
---     with their picture, their level, and whether they are in the world right now. The
+--     with their picture, their level, and where they are: the part of town a player in
+--     the world is in (as the game names it under its contacts), or "away". The
 --     host knows them from the save (the characters written beside it) and tells the
 --     guests; a guest tells the host its picture and level as they change.
 --   * A message a player writes shows that player's picture, in every game. Messages are
@@ -45,10 +48,19 @@ local PORTRAIT = "/Game/GUI/Avatars/clientAvatars/client-avatar-%02d.client-avat
 local MARK = "\194\160"
 local COLLAPSED, NO_HIT, SELF_NO_HIT = 1, 3, 4
 
--- What can be picked: "" the game's figure, "aNN" a portrait, "tag" the player's tag.
--- (the ten: a pug, a corgi, mushrooms, a comic face, a speedometer, a red car, a sunset,
--- green code, an eye, a hand making the peace sign)
-Shady.CHOICES = { "", "a01", "a02", "a04", "a07", "a09", "a10", "a14", "a17", "a31", "a32", "tag" }
+-- What can be picked: "" the game's figure, "aNN" a portrait, "face" the face of the
+-- player's character, "tag" the player's tag.
+-- (the seven portraits: a pug, a corgi, mushrooms, a speedometer, a sunset, green code, a
+-- hand making the peace sign. A picture of an older version that is no longer offered, a
+-- comic face, a red car or an eye, still shows for whoever has it.)
+-- They stand in two rows of five, the tag and the face last. A player who has never
+-- picked has the face.
+Shady.CHOICES = { "", "a01", "a02", "a04", "a09", "a14", "a17", "a32", "tag", "face" }
+local FIRST_PICTURE = "face"
+local GAME_NAME = "YaSellin420"
+-- The face picture's own shot (coop/thumbs.lua): the face in the middle of the frame.
+Shady.FACE_SHOT = "portrait"
+Shady.PORTRAIT = { dist = 50, up = 80, fov = 28, w = 192, h = 192, drop = 6 }
 
 local function asset(path)
     local o = StaticFindObject(path)
@@ -62,9 +74,52 @@ end
 
 local function myId() return tostring(Net.S.me or "me") end
 
+-- A character's look as one word (the face picture is made once per look).
+local LOOK_FIELDS = { "body", "head", "hair", "hat", "glasses", "beard" }
+local function lookSig(look)
+    if type(look) ~= "table" or type(look.body) ~= "string" then return "" end
+    local parts = {}
+    for i, f in ipairs(LOOK_FIELDS) do parts[i] = tostring(look[f] or "") end
+    return table.concat(parts, "|")
+end
+
+-- The look of this player's character, as plain text fields.
+local function myLook()
+    local Look = package.loaded["coop.look"]
+    local out = nil
+    pcall(function()
+        local l = Look.current()
+        out = { arms = true }
+        for _, f in ipairs(LOOK_FIELDS) do if type(l[f]) == "string" then out[f] = l[f] end end
+    end)
+    if out and type(out.body) ~= "string" then out = nil end
+    return out
+end
+
+-- The face of a character with that look: head and shoulders, cut round like the game's
+-- portraits. (coop/thumbs.lua takes the picture, coop/tags.lua cuts it.)
+local function facePicture(look)
+    local sig = lookSig(look)
+    if sig == "" then return nil end
+    local Thumbs, Tags = package.loaded["coop.thumbs"], package.loaded["coop.tags"]
+    if type(Thumbs) ~= "table" or type(Tags) ~= "table" or not Tags.roundPicture then return nil end
+    local rt = nil
+    pcall(function()
+        Thumbs.SHOTS.portrait, Thumbs.FEMALE_DROP.portrait = Shady.PORTRAIT, Shady.PORTRAIT.drop
+        local e = Thumbs.get("shady:" .. Shady.FACE_SHOT .. ":" .. sig, { look = look, shot = Shady.FACE_SHOT })
+        if e then rt = Tags.roundPicture(Shady.FACE_SHOT .. ":" .. sig, e) end
+    end)
+    return valid(rt) and rt or nil
+end
+
 -- What goes on an image for a picture (looked up anew every time: nothing of the game's
--- is kept between calls).
-local function resource(pic, pid)
+-- is kept between calls). `look`: the character whose face a "face" picture shows.
+local function resource(pic, pid, look)
+    if pic == "face" then
+        local rt = facePicture(look)
+        if rt then return rt end
+        pic = ""
+    end
     if pic == "tag" then
         local Tags = package.loaded["coop.tags"]
         local rt = nil
@@ -102,7 +157,14 @@ local pending = nil       -- a picture picked before the player has a character 
 local function myPic()
     local r = Guests.ready() and Guests.self() or nil
     if type(r) == "table" and type(r.pic) == "string" then return r.pic end
-    return pending or ""
+    return pending or FIRST_PICTURE
+end
+
+-- The face picture's look: the character as it is now; it is also kept in the record
+-- (`fl`), so that the others have it while this player is away.
+local function myFace()
+    if myPic() ~= "face" then return nil end
+    return myLook()
 end
 
 local function setPic(pic)
@@ -114,6 +176,7 @@ local function setPic(pic)
     end
     pending = nil
     r.pic = pic
+    if pic == "face" then r.fl = myLook() end
     Guests.setSelf(r)
     log("Shady Comm: picture '%s'", pic == "" and "the grey figure" or pic)
 end
@@ -124,6 +187,61 @@ local function myLevel()
     pcall(function() level = math.floor(tonumber(Core.find("statisticsManager_C").playerLevel) or 1) end)
     return level
 end
+
+---------------------------------------------------------------- the part of town
+-- The game's parts of town have no borders, only selling spots (DrugSaleArea: an id and its
+-- spots). A player is in the part whose spot is nearest. The id travels; every game shows
+-- the name its own area list has for it.
+
+local SALE_AREA = "/Game/Interactive/DrugSale/DrugSaleArea.DrugSaleArea_C"
+local spots, spotsFor, spotsAt = nil, nil, 0
+local zoneNow, zoneAt = nil, 0
+
+local function myZone()
+    local player = World.player()
+    if not player then return nil end
+    local key = player:GetAddress()
+    if spotsFor ~= key or not spots or (#spots == 0 and os.clock() - spotsAt > 10) then
+        spots, spotsFor, spotsAt, zoneAt = {}, key, os.clock(), 0
+        for _, area in ipairs(Core.actors(SALE_AREA) or {}) do
+            pcall(function()
+                local id = area.AreaID:ToString()
+                area.salePoints:ForEach(function(_, v)
+                    local spot = v:get()
+                    if valid(spot) then
+                        local l = spot:K2_GetActorLocation()
+                        spots[#spots + 1] = { x = l.X, y = l.Y, id = id }
+                    end
+                end)
+            end)
+        end
+    end
+    if os.clock() - zoneAt < 2 then return zoneNow end
+    zoneAt = os.clock()
+    local best, least = nil, math.huge
+    pcall(function()
+        local l = player:K2_GetActorLocation()
+        for _, s in ipairs(spots) do
+            local d = (s.x - l.X) ^ 2 + (s.y - l.Y) ^ 2
+            if d < least then best, least = s.id, d end
+        end
+    end)
+    zoneNow = best
+    return best
+end
+
+-- id -> the name the game shows for that part of town.
+local function zoneNames()
+    local names = {}
+    pcall(function()
+        local m = Repl.singleton("saleAreaManager_C")
+        for i = 1, m.saleAreaStrings:GetArrayNum() do
+            names[m.saleAreaStrings[i]:ToString()] = m.saleAreaDisplayName[i]:ToString()
+        end
+    end)
+    return names
+end
+Shady.myZone, Shady.zoneNames = myZone, zoneNames
 
 ---------------------------------------------------------------- who is in this world
 
@@ -163,8 +281,9 @@ local function hostRoster()
             local on = here[key] == true
             local said = on and online[key] or nil
             local kept = type(r.c) == "table" and type(r.c.pic) == "string" and r.c.pic or ""
+            local face = (said and said.k) or (type(r.c) == "table" and type(r.c.fl) == "table" and r.c.fl) or nil
             out[#out + 1] = { id = key, name = tostring(r.name or "?"), level = (said and said.l) or Guests.levelOf(r) or 1, pic = (said and said.p) or kept,
-                no = math.floor(tonumber(r.no)), on = on }
+                no = math.floor(tonumber(r.no)), on = on, look = face, zone = said and said.z or nil }
         end
     end
     table.sort(out, function(a, b) return a.no < b.no end)
@@ -173,13 +292,13 @@ end
 
 local function wire(list)
     local out = {}
-    for i, e in ipairs(list) do out[i] = { i = e.id, n = e.name, l = e.level, p = e.pic, o = e.no, on = e.on } end
+    for i, e in ipairs(list) do out[i] = { i = e.id, n = e.name, l = e.level, p = e.pic, o = e.no, on = e.on, k = e.pic == "face" and e.look or nil, z = e.zone } end
     return out
 end
 
 local function signature(list)
     local parts = {}
-    for _, e in ipairs(list) do parts[#parts + 1] = table.concat({ e.id, e.name, tostring(e.level), e.pic, tostring(e.no), tostring(e.on) }, "/") end
+    for _, e in ipairs(list) do parts[#parts + 1] = table.concat({ e.id, e.name, tostring(e.level), e.pic, tostring(e.no), tostring(e.on), lookSig(e.look), tostring(e.zone or "") }, "/") end
     return table.concat(parts, ";")
 end
 
@@ -188,14 +307,16 @@ Net.on("shr", function(sender, data)
     local list, me = {}, myId()
     -- the host itself
     if type(data.h) == "table" then
-        list[1] = { id = tostring(sender), name = Net.name(sender), level = tonumber(data.h.l) or 1, pic = tostring(data.h.p or ""), no = 1, on = true }
+        list[1] = { id = tostring(sender), name = Net.name(sender), level = tonumber(data.h.l) or 1, pic = tostring(data.h.p or ""), no = 1, on = true,
+            look = type(data.h.k) == "table" and data.h.k or nil, zone = type(data.h.z) == "string" and data.h.z or nil }
     end
     for _, e in ipairs(data.r) do
         if type(e) == "table" and e.i ~= nil then
             if tostring(e.i) == me then
                 myNo = tonumber(e.o)
             else
-                list[#list + 1] = { id = tostring(e.i), name = tostring(e.n or "?"), level = tonumber(e.l) or 1, pic = tostring(e.p or ""), no = tonumber(e.o) or 0, on = e.on == true }
+                list[#list + 1] = { id = tostring(e.i), name = tostring(e.n or "?"), level = tonumber(e.l) or 1, pic = tostring(e.p or ""), no = tonumber(e.o) or 0, on = e.on == true,
+                    look = type(e.k) == "table" and e.k or nil, zone = type(e.z) == "string" and e.z or nil }
             end
         end
     end
@@ -204,36 +325,38 @@ end)
 
 Net.on("shp", function(sender, data)
     if not live() or World.role ~= "host" or type(data) ~= "table" then return end
-    online[tostring(sender)] = { p = tostring(data.p or ""), l = tonumber(data.l) or 1 }
+    online[tostring(sender)] = { p = tostring(data.p or ""), l = tonumber(data.l) or 1, k = type(data.k) == "table" and data.k or nil, z = type(data.z) == "string" and data.z or nil }
     sentAt = 0          -- (the others hear of it at the next round)
 end)
 
 local function tendRoster()
     if hosting() then
         myNo = 1
-        others = hostRoster()
+        others = Shady.stage or hostRoster()      -- (`stage`: a made-up list, for pictures of the screen)
         if World.active and World.role == "host" then
-            local mine = { p = myPic(), l = myLevel() }
-            local sig = signature(others) .. "|" .. mine.p .. "|" .. mine.l
+            local mine = { p = myPic(), l = myLevel(), k = myFace(), z = myZone() }
+            local sig = signature(others) .. "|" .. mine.p .. "|" .. mine.l .. "|" .. lookSig(mine.k) .. "|" .. tostring(mine.z)
             if sig ~= sentRoster or os.clock() - sentAt > 20 then
                 sentRoster, sentAt = sig, os.clock()
                 for _, id in ipairs(World.targets()) do Net.send("shr", { r = wire(others), h = mine }, id) end
             end
         end
     elseif World.active then
-        local mine = myPic() .. "|" .. myLevel()
+        local face = myFace()
+        local zone = myZone()
+        local mine = myPic() .. "|" .. myLevel() .. "|" .. lookSig(face) .. "|" .. tostring(zone)
         if mine ~= sentMine or os.clock() - sentMineAt > 20 then
             sentMine, sentMineAt = mine, os.clock()
-            Net.send("shp", { p = myPic(), l = myLevel() }, World.host or Net.S.owner)
+            Net.send("shp", { p = myPic(), l = myLevel(), k = face, z = zone }, World.host or Net.S.owner)
         end
     end
 end
 
 -- The picture of the player with that number in this world.
 local function picOfNo(no)
-    if no == nil or no == myNo then return myPic(), myId() end
-    for _, e in ipairs(others) do if e.no == no then return e.pic, e.id end end
-    return "", nil
+    if no == nil or no == myNo then return myPic(), myId(), myFace() end
+    for _, e in ipairs(others) do if e.no == no then return e.pic, e.id, e.look end end
+    return "", nil, nil
 end
 
 function Shady.others() return others end
@@ -298,9 +421,9 @@ local function paintMessages(ui)
             local text = w.txtMessageMine:GetText():ToString()
             local no = trailing(text)
             if no == 0 then no = nil end
-            local pic, pid = picOfNo(no)
+            local pic, pid, look = picOfNo(no)
             local key = pic .. "/" .. tostring(pid)
-            if cache[key] == nil then cache[key] = resource(pic, pid) or false end
+            if cache[key] == nil then cache[key] = resource(pic, pid, look) or false end
             -- (the picture beside the player's bubble: the second thing in the bubble's row)
             local row = w.messageMine:GetContent()
             if cache[key] and valid(row) and row:GetChildrenCount() >= 2 then show(row:GetChildAt(1), cache[key]) end
@@ -333,6 +456,7 @@ local function addPlayers(ui)
     local groupClass, rowClass = asset(GROUP), asset(CONTACT)
     if not valid(list) or not valid(lib) or not groupClass or not rowClass then return end
     local made = {}
+    local names = zoneNames()
     local title = lib:Create(ui, groupClass, nil)
     if not valid(title) then return end
     pcall(function() title.txtHeading:SetText(FText("PLAYERS")) end)
@@ -341,8 +465,8 @@ local function addPlayers(ui)
         local row = lib:Create(ui, rowClass, nil)
         if valid(row) then
             pcall(function() row.txtUsername:SetText(FText(e.name)) end)
-            pcall(function() row.txtAreaNam:SetText(FText(e.on and "in the world" or "away")) end)
-            pcall(function() show(row.avatar, resource(e.pic, e.id)) end)
+            pcall(function() row.txtAreaNam:SetText(FText(e.on and (names[e.zone or ""] or "in the world") or "away")) end)
+            pcall(function() show(row.avatar, resource(e.pic, e.id, e.look)) end)
             for _, name in ipairs({ "txtNewMessages", "unreadMarker", "userBgActive", "arrestCover", "blackRibon", "expProgress" }) do
                 pcall(function() row[name]:SetVisibility(COLLAPSED) end)
             end
@@ -400,6 +524,15 @@ local function attach(ui)
         if name == "Image_8" then a.image = c end
         if name == "VerticalBox_12" then a.nameBox = c end
     end
+    -- the line at the right of the top bar: "Loged in as" and the game's made-up name
+    pcall(function()
+        -- (it is no variable of the screen: looked up by its name in the screen's widget tree)
+        local tree = ui.WidgetTree:GetFullName():match("^%S+%s+(.+)$")
+        local c = StaticFindObject(tree .. ".TextBlock_13")
+        if not valid(c) then return end
+        local said = c:GetText():ToString()
+        if said:find(GAME_NAME, 1, true) then a.login, a.loginText = c, said end
+    end)
     local player = World.player()
     local pc = player:GetController()
     local at = { X = 80, Y = 18 }
@@ -470,16 +603,19 @@ local function openPicker()
     xs:SetVerticalAlignment(2)
     column:AddChildToVerticalBox(head):SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 18 })
     local now = myPic()
+    local face = myLook()
     local perRow = math.ceil(#Shady.CHOICES / 2)
     local row = nil
     for i, pic in ipairs(Shady.CHOICES) do
         if (i - 1) % perRow == 0 then
             row = s.new("HorizontalBox")
-            column:AddChildToVerticalBox(row):SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 14 })
+            local rs = column:AddChildToVerticalBox(row)
+            rs:SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 14 })
+            rs:SetHorizontalAlignment(2)
         end
         local img = s.new("Image")
         pcall(function()
-            img.Brush.ResourceObject = resource(pic, myId())
+            img.Brush.ResourceObject = resource(pic, myId(), face)
             img.Brush.ImageSize = { X = 96, Y = 96 }
         end)
         img:SetVisibility(NO_HIT)
@@ -495,11 +631,11 @@ local function openPicker()
         local cell = s.new("VerticalBox")
         local on = pic == now
         cell:AddChildToVerticalBox(s.box(on and Screen.GREEN or { R = 0.02, G = 0.02, B = 0.025, A = 1 }, s.sized(stack, 96, 96), 4))
-        local label = pic == "tag" and "USE TAG" or (pic == "" and "DEFAULT" or "")
+        local label = pic == "tag" and "USE TAG" or (pic == "face" and "USE FACE" or "")
         local ls = cell:AddChildToVerticalBox(s.text(label, "small", 13, on and Screen.GREEN or Screen.GREY))
         ls:SetHorizontalAlignment(2)
         ls:SetPadding({ Left = 0, Top = 4, Right = 0, Bottom = 0 })
-        row:AddChildToHorizontalBox(cell):SetPadding({ Left = 0, Top = 0, Right = 14, Bottom = 0 })
+        row:AddChildToHorizontalBox(cell):SetPadding({ Left = 7, Top = 0, Right = 7, Bottom = 0 })
     end
     s.place(column, 0.5, 0.5, 0, 0)
 end
@@ -535,6 +671,22 @@ Core.every(0.5, function()
     end
     -- a picture picked before there was a character to keep it with
     if pending and Guests.ready() and type(Guests.self()) == "table" then setPic(pending) end
+    -- a character without a picture gets the first one for good (the others are told what
+    -- is kept, also while this player is away)
+    if not pending and Guests.ready() then
+        local r = Guests.self()
+        if type(r) == "table" and r.pic == nil then setPic(FIRST_PICTURE) end
+    end
+    -- the face picture follows the character (a haircut, another hat)
+    if myPic() == "face" then
+        pcall(function()
+            local r, l = Guests.self(), myLook()
+            if type(r) == "table" and l and lookSig(r.fl) ~= lookSig(l) then
+                r.fl = l
+                Guests.setSelf(r)
+            end
+        end)
+    end
     -- the messages this world came with are nobody's in particular
     if knownFor ~= player:GetAddress() then
         pcall(function()
@@ -561,12 +713,21 @@ Core.every(0.5, function()
         pcall(function() ui:renderContacts() end)
         pcall(function() if ui.curSelectedUser >= 0 then paintMessages(ui) end end)
     end
+    -- the Steam name where the game has its made-up one (it is known in single player too)
+    if att.login and att.loginText then
+        local name = tostring(Net.S.myName or "")
+        if name ~= "" and name ~= "?" and att.loginName ~= name then
+            local text = att.loginText:gsub(GAME_NAME, function() return name end)
+            if pcall(function() att.login:SetText(FText(text)) end) then att.loginName = name end
+        end
+    end
     local pic = myPic()
     local version = 0
     pcall(function() version = package.loaded["coop.tags"].versionOf() end)
-    local key = pic .. "/" .. version
+    local face = myFace()
+    local key = pic .. "/" .. version .. "/" .. lookSig(face)
     if att.shown ~= key then
-        if show(att.image, resource(pic, myId())) then att.shown = key end
+        if show(att.image, resource(pic, myId(), face)) then att.shown = key end
         pcall(function() if ui.curSelectedUser >= 0 then paintMessages(ui) end end)
     end
     local level = "lvl " .. myLevel()
@@ -591,6 +752,6 @@ end
 -- (for test scripts)
 function Shady.attached() return att end
 function Shady.setOthers(list) others = list end
-Shady.resource, Shady.trailing = resource, trailing
+Shady.resource, Shady.trailing, Shady.myLook = resource, trailing, myLook
 
 return Shady
