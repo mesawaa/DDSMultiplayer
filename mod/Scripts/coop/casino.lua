@@ -41,6 +41,11 @@ local SEAT_NAMES = { "middle seat", "left seat", "right seat" }      -- seen fro
 -- a plate are where the card table stands; they are known by name.
 local LOUNGE = "/Game/Levels/stream_ballenaClub.stream_ballenaClub:PersistentLevel."
 local IN_THE_WAY = { "SM_Table_4", "SM_Table_5", "SM_Plate_4" }
+-- A bottle of the lounge and three glasses of the city level stood on those tables; they go
+-- onto the felt (read from the two levels' files: nothing else of either level is inside
+-- the card table's footprint).
+local ON_THE_FELT = { LOUNGE .. "SM_Bottle_4", "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_319",
+    "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_322", "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_325" }
 -- Its furniture next to the seats, as boxes around the table's centre (measured in the
 -- running game): the sofas on the room's side, those along the wall, the third table.
 local BOOTHS = {
@@ -204,32 +209,50 @@ local function buildRoom()
     log("Casino: the card room is set up (%d pieces)", #room.actors)
 end
 
--- The lounge has a table of its own where the card table stands. It and whatever furniture
--- is inside the card table's footprint are hidden (and put back when the card room is
--- removed); its glasses and bottles go onto the felt. The lounge's furniture is not there
--- yet when a player first comes near, so this is done again and again.
+-- The lounge has a table of its own where the card table stands. It and the furniture
+-- inside the card table's footprint are hidden (and put back when the card room is
+-- removed); the glasses and the bottle that stood on them go onto the felt. The lounge's
+-- furniture is not there yet when a player first comes near, so this is done again and
+-- again. Everything is looked up by name: this used to go through every StaticMeshActor
+-- of the world, about 300 ms each time, and did so every 3 s for as long as a player was
+-- within 25 m of the table (the list of what was hidden was emptied right after it had
+-- been filled, so the 60 s pause never began), which players felt as hitches "only at
+-- night", the club's hours (reported with 0.18.0).
+-- A lookup by name costs 25-30 ms here (UE4SS walks the whole object list), so what was
+-- found is kept until it is gone, and the lounge's own pieces are only looked for while
+-- its level is loaded (room.loungeLoaded, kept by the level watcher below).
+local found = {}
+local function lookup(path, lounge)
+    local a = found[path]
+    if a and Core.alive(a) then return a end
+    found[path] = nil
+    if lounge and room and room.loungeLoaded == false then return nil end
+    a = StaticFindObject(path)
+    if Core.alive(a) then
+        found[path] = a
+        return a
+    end
+    return nil
+end
+
+local hideInTheWay
 local function putAway()
     if not room then return end
     local now = os.clock()
     if now < (room.putAwayAt or 0) then return end
-    room.putAwayAt = now + (#room.hidden > 0 and 60 or 3)
-    for _, a in ipairs(FindAllOf("StaticMeshActor") or {}) do
-        pcall(function()
-            if room.own[a:GetAddress()] or not Core.alive(a) or a.bHidden == true then return end
-            local l = a:K2_GetActorLocation()
-            if math.abs(l.X - TX) > 135 or math.abs(l.Y - TY) > 215 or l.Z < FLOOR - 8 or l.Z > TOP + 45 then return end
-            local name = a.StaticMeshComponent.StaticMesh:GetFName():ToString()
-            local lower = name:lower()
-            if lower:find("table", 1, true) or lower:find("plate", 1, true) or lower:find("seat", 1, true) or lower:find("chair", 1, true) or lower:find("sofa", 1, true) then
-                a:SetActorHiddenInGame(true)
-                a:SetActorEnableCollision(false)
-                room.hidden[#room.hidden + 1] = a
-                log("Casino: put away the lounge's %s", name)
-            elseif (lower:find("glass", 1, true) or lower:find("bottle", 1, true)) and math.abs(l.Z - (TOP + 0.4)) > 1 then
-                a:SetMobility(2)
-                a:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = TOP + 0.4 }, false, {}, true)
-            end
-        end)
+    room.putAwayAt = now + 3
+    hideInTheWay()
+    for _, path in ipairs(ON_THE_FELT) do
+        local a = lookup(path, path:sub(1, #LOUNGE) == LOUNGE)
+        if a then
+            pcall(function()
+                local l = a:K2_GetActorLocation()
+                if math.abs(l.X - TX) <= 135 and math.abs(l.Y - TY) <= 215 and math.abs(l.Z - (TOP + 0.4)) > 1 then
+                    a:SetMobility(2)
+                    a:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = TOP + 0.4 }, false, {}, true)
+                end
+            end)
+        end
     end
 end
 
@@ -259,17 +282,23 @@ local function loungeLevel(player)
     return lounge.level
 end
 
-local function hideInTheWay()
+-- (kept in room.hidden even when already hidden, so that clearRoom puts it back)
+hideInTheWay = function()
     local n = 0
     for _, name in ipairs(IN_THE_WAY) do
-        local a = StaticFindObject(LOUNGE .. name)
-        if Core.alive(a) then
+        local a = lookup(LOUNGE .. name, true)
+        if a then
             n = n + 1
             if a.bHidden ~= true then
                 a:SetActorHiddenInGame(true)
                 a:SetActorEnableCollision(false)
-                room.hidden[#room.hidden + 1] = a
+                log("Casino: put away the lounge's %s", name)
             end
+            local addr, known = a:GetAddress(), false
+            for _, h in ipairs(room.hidden) do
+                if valid(h) and h:GetAddress() == addr then known = true break end
+            end
+            if not known then room.hidden[#room.hidden + 1] = a end
         end
     end
     return n
@@ -316,6 +345,7 @@ Core.onTick(function()
             end
         end
         local loaded, visible = level:IsLevelLoaded() == true, level:IsLevelVisible() == true
+        room.loungeLoaded = loaded
         if loaded and not lounge.loaded then
             room.hidden = {}        -- what was hidden before went with the level before
             hideInTheWay()

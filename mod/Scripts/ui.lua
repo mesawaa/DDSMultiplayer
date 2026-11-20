@@ -51,7 +51,9 @@ local PROFILES = {
         -- MULTIPLAYER then starts further left than SETTINGS above it. Moved right so that
         -- the left edges keep stepping to the right.
         entry = { x = 372, y = 100 },
-        shift = { { "btnExitGame", 25, 50 } },
+        -- MOD OPTIONS (coop/options.lua) below it, one more step to the right
+        extra = { label = "MOD OPTIONS", x = 401, y = 150 },
+        shift = { { "btnExitGame", 66, 100 } },
         panel = { x = 760, y = -150 },
         blocker = "confirmPanel",
         raise = "confirmPanel",             -- keep the stock confirm dialog above our widgets
@@ -158,6 +160,17 @@ local function build(kind, menu)
     entrySlot:SetSize(tplSlot:GetSize())
     entrySlot:SetPosition({ X = profile.entry.x or tplPos.X, Y = profile.entry.y })
     st.entry, st.entryLabel = entry, entryLabel
+    if profile.extra then
+        local extra, extraLabel = menuButton(profile.extra.label)
+        extraLabel:SetColorAndOpacity(st.tplLabel.ColorAndOpacity)
+        local extraSlot = canvas:AddChildToCanvas(extra)
+        extraSlot:SetAnchors(tplSlot.LayoutData.Anchors)
+        extraSlot:SetAlignment(tplSlot.LayoutData.Alignment)
+        extraSlot:SetAutoSize(tplSlot.bAutoSize)
+        extraSlot:SetSize(tplSlot:GetSize())
+        extraSlot:SetPosition({ X = profile.extra.x, Y = profile.extra.y })
+        st.extra, st.extraLabel = extra, extraLabel
+    end
 
     local u = profile.underline
     if u and w[u.stock] then
@@ -271,6 +284,12 @@ local function build(kind, menu)
             if opened then UI.close() end
         end },
     }
+    if st.extra then
+        st.buttons[#st.buttons + 1] = { widget = st.extra, label = st.extraLabel, click = function()
+            UI.close()
+            if C.modOptions then C.modOptions() end
+        end }
+    end
     for _, b in ipairs(st.buttons) do
         if b.idle then b.label:SetColorAndOpacity(slateColor(b.idle)) end
     end
@@ -455,11 +474,13 @@ local function followStockEntry()
     if opacity ~= st.entryOpacity then
         st.entryOpacity = opacity
         entry:SetRenderOpacity(opacity)
+        if st.extra then st.extra:SetRenderOpacity(opacity) end
     end
     local visibility = tpl.Visibility
     if visibility ~= st.entryVisibility then
         st.entryVisibility = visibility
         entry:SetVisibility(visibility)
+        if st.extra then st.extra:SetVisibility(visibility) end
     end
 end
 
@@ -515,6 +536,7 @@ function UI.destroy(kind)
             s.underline.stock:SetRenderOpacity(1)
         end
         if s.entry then s.entry:RemoveFromParent() end
+        if s.extra then s.extra:RemoveFromParent() end
     end)
     states[kind] = nil
     if st == s then st = nil end

@@ -1294,6 +1294,79 @@ Core.Hooks.add(CONTAINER_BASE .. ":openContainer", function(ctx)
     end)
 end)
 
+---------------------------------------------------------------- resync on request (coop/options.lua)
+
+-- Every shared manager in full, one every few tenths of a second (all at once is a hitch),
+-- and every container compared, as after a join.
+local function sendManagers(to)
+    local list = {}
+    for className, m in pairs(MANAGERS) do
+        if Core.enabled(m.feature) then list[#list + 1] = className end
+    end
+    table.sort(list)
+    for i, className in ipairs(list) do
+        Core.after(0.25 * i, function()
+            if World.role ~= "host" or not World.inWorld[to] then return end
+            local obj = Repl.singleton(className)
+            if not obj then return end
+            pcall(function()
+                Repl.send("st", { id = "s:" .. className, c = className, v = wire(className, Repl.export(obj, names(obj, className))) }, to)
+            end)
+        end)
+    end
+    if Core.enabled("Objects") then sweeps[to] = { at = os.clock() + 0.25 * #list + 1, i = 1, sent = 0 } end
+    return #list
+end
+
+Net.on("rsall", function(sender)
+    if World.role ~= "host" or not World.inWorld[sender] then return end
+    local n = sendManagers(sender)
+    log("Sync: %s asked for everything again: %d managers, then the containers", Net.name(sender), n)
+end)
+
+-- A guest asks the host for the whole shared state; the host sends it to every guest.
+-- Returns false when there is nobody to sync with.
+function Sync.resyncAll()
+    if not World.shared() then return false end
+    if World.role == "guest" then
+        Net.send("rsall", {}, World.host or Net.S.owner)
+        log("Sync: asked the host for everything again")
+        return true
+    end
+    for id in pairs(World.inWorld) do sendManagers(id) end
+    log("Sync: sending everything again to every guest")
+    return true
+end
+
+-- Draws again what the drug-lab equipment and the bags on the ground hold (labels, lids,
+-- heaps, models). Returns how many things were looked at.
+function Sync.redrawAll()
+    local n = 0
+    for _, a in ipairs(Core.actors(EQUIPMENT) or {}) do
+        if Core.alive(a) then
+            pcall(refreshEquipment, a)
+            n = n + 1
+        end
+    end
+    for _, a in ipairs(Core.actors("/Game/Interactive/pickupItems/drugPickupItem.drugPickupItem_C") or {}) do
+        pcall(function()
+            if Core.alive(a) and (tonumber(a.baseGramsPerItem) or 0) > 0 and a.SubstanceID:ToString() ~= "None" then
+                a:configPackage()
+                n = n + 1
+            end
+        end)
+    end
+    pcall(function()
+        local Dyn = package.loaded["coop.dyn"]
+        if type(Dyn) ~= "table" then return end
+        for _, a in ipairs(Core.actors("/Game/Interactive/pickupItemBase.pickupItemBase_C") or {}) do
+            if Dyn.ensureModel(a) then n = n + 1 end
+        end
+    end)
+    log("Sync: %d drug-lab things and bags drawn again", n)
+    return n
+end
+
 function Sync.isApplying() return applying end
 function Sync.tracked() return tracked end
 

@@ -76,6 +76,8 @@ ui.init({
     host = function() host(true) end,
     invite = function() Net.command("INVITE") end,
     leave = leave,
+    -- the MOD OPTIONS entry of the pause menu (coop/options.lua)
+    modOptions = function() if M.options then M.options.fromPause() end end,
     world = {
         canJoin = function() return M.world ~= nil and M.world.canJoin() end,
         join = function() if M.world then M.world.requestJoin() end end,
@@ -196,7 +198,7 @@ end)
 
 M.Core, M.Net, M.ui, M.XP, M.host, M.leave, M.statusText = Core, Net, ui, XP, host, leave, statusText
 
-for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.third", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds", "coop.lotto" }) do
+for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.third", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds", "coop.lotto", "coop.options" }) do
     local ok, mod = pcall(require, name)
     if ok then
         M[name:match("[^.]+$")] = mod

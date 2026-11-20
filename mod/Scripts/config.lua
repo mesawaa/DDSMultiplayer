@@ -12,6 +12,8 @@ return {
     StrutKey = "CAPS_LOCK",
     -- The interaction key of the mod's own places: the clothes shop, the card room's door.
     WardrobeKey = "U",
+    -- Open the MOD OPTIONS screen (also in the pause menu): skip a stuck story step, repairs, settings.
+    ModOptionsKey = "F9",
     -- Show the other players on the map and the compass.
     ShowPlayersOnMap = true,
 

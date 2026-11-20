@@ -1,9 +1,9 @@
-DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.18.0
+DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.18.2
 ================================================================
 
 Windows only. You need Drug Dealer Simulator on Steam, and you and the host
 must be Steam friends. Up to four can play together. Everybody must have the
-same mod version (v0.18.0); the mod refuses to connect different versions.
+same mod version (v0.18.2); the mod refuses to connect different versions.
 
 
 INSTALL
@@ -18,7 +18,7 @@ INSTALL
 5. Start the game from Steam.
 
 CHECK: the main menu now has a MULTIPLAYER entry below SETTINGS. Open it:
-the line under NOT IN A LOBBY starts with "Mod v0.18.0".
+the line under NOT IN A LOBBY starts with "Mod v0.18.2".
 
 Updating from an older version: same steps. The installer replaces the old one.
 
@@ -68,6 +68,8 @@ U     talk to Marco, who sells clothes at the white rack just right of
       table in the night club
 F7    leave the lobby
 F8    show lobby status
+F9    MOD OPTIONS (also in the pause menu): skip a story step that is stuck
+      (the other players must allow it), repairs, settings
 
 
 IF SOMETHING GOES WRONG

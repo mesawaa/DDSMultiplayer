@@ -222,10 +222,67 @@ Story.profileFilter = function(profile)
     end
 end
 
+---------------------------------------------------------------- the ATMs
+
+-- The cash machines say "out of order" until the story's bank step switches them on, and
+-- the game does that only in the game whose quest manager runs the step (`introduceBank`:
+-- `unlockAtm` on every atmMachine, then bankWasIntroduced). With one storyline for
+-- everybody the step runs in one game and arrives in the others as task table and quest
+-- variables only: their machines stayed out of order, "Check out the ATM" could not be
+-- done there, and the step never runs again once bankWasIntroduced is set (reported with
+-- 0.18.0, Sync.Story off). So in every game, once this game's quest manager says the bank
+-- was introduced, every machine still switched off is switched on as the game does it.
+-- Independent of Sync.Story: with separate storylines bankWasIntroduced is the player's own.
+local ATM = "/Game/Interactive/atmMachine.atmMachine_C"
+local atm = { addr = nil, done = false, at = 0, useText = nil }
+
+local function atmUseText()
+    if atm.useText then return atm.useText end
+    pcall(function()
+        local lib = StaticFindObject("/Script/Engine.Default__KismetTextLibrary")
+        atm.useText = lib:TextFromStringTable(FName("/Game/StringTables/strTable_interfaceActionNames.strTable_interfaceActionNames"), "ACTION-USE")
+    end)
+    return atm.useText
+end
+
+local function tendAtms(q)
+    if q.bankWasIntroduced ~= true then return end
+    local addr = q:GetAddress()
+    if atm.addr ~= addr then atm.addr, atm.done, atm.at = addr, false, 0 end
+    -- once all are on, a look now and then (cheap, but there is no need for more)
+    local now = os.clock()
+    if atm.done and now - atm.at < 30 then return end
+    atm.at = now
+    local list = Core.actors(ATM)
+    if not list then return end
+    local switched = 0
+    for _, m in ipairs(list) do
+        if valid(m) and m.atmActive ~= true then
+            pcall(function() m:unlockAtm() end)
+            -- the step already done: the machine reads USE, as after a load
+            if q.atmWasActivated == true then
+                local text = atmUseText()
+                if text then pcall(function() m.objActionName = text end) end
+            end
+            switched = switched + 1
+        end
+    end
+    pcall(function()
+        local computer = Repl.singleton("mainComputer_C")
+        if computer and computer.bankAvailable ~= true then computer.bankAvailable = true end
+    end)
+    atm.done = true
+    if switched > 0 then
+        Facts.stats.atms = (Facts.stats.atms or 0) + switched
+        log("Facts: the bank step has been reached; %d of %d ATM(s) were still out of order here and are switched on", switched, #list)
+    end
+end
+
 ---------------------------------------------------------------- lifecycle
 
 local function reset()
     sectorC = { addr = nil, since = nil, done = nil }
+    atm.addr, atm.done, atm.at = nil, false, 0
     ballena = { own = false, borrowed = false, mark = nil, world = false, guests = {}, sentOwn = nil, sentAt = 0, sentWorld = nil, told = false }
 end
 
@@ -257,6 +314,15 @@ Core.every(3, function()
     if not ok then log("Facts: %s", tostring(e)) end
 end)
 
-function Facts.state() return { sectorC = sectorC, ballena = ballena } end
+-- (any storyline setting)
+Core.every(5, function()
+    if not World.active or not Core.enabled("Orders") or not storyReady() then return end
+    local q = Repl.singleton(QM)
+    if not q then return end
+    local ok, e = pcall(tendAtms, q)
+    if not ok then log("Facts: %s", tostring(e)) end
+end)
+
+function Facts.state() return { sectorC = sectorC, ballena = ballena, atm = atm } end
 
 return Facts

@@ -3,7 +3,7 @@
 
 local Core = {}
 
-Core.VERSION = "0.18.0"
+Core.VERSION = "0.18.2"
 Core.config = require("config")
 Core.instance = nil      -- set from the command line (-ddsmp=NAME), nil normally
 Core.logFile = nil       -- extra log file, set once the ipc directory is known

@@ -1191,6 +1191,70 @@ end)
 
 Story.firstMeetingSeat, Story.firstMeetingEddie = firstMeetingSeat, firstMeetingEddie
 
+---------------------------------------------------------------- skipping a step (coop/options.lua)
+
+-- The story steps that are open in this game's task list: { id, name, desc, key } each,
+-- oldest first. Orders (sale tasks) and Eddie's debt are no story steps; another
+-- player's steps read "completed" here and are not listed either.
+function Story.openSteps()
+    local q = manager()
+    if not q then return {} end
+    local eddieCash = nil
+    pcall(function()
+        for _, e in ipairs(Core.actors("/Game/Temporary/panEddie.panEddie_C") or {}) do
+            local id = e.curCashTaskID
+            if type(id) == "number" and id >= 0 then eddieCash = id end
+        end
+    end)
+    local out = {}
+    for id = 0, length(q) - 1 do
+        local sale = true
+        pcall(function() sale = q.taskIsSale[id + 1] == true end)
+        if not closed(q, id) and not sale and id ~= eddieCash and not Story.foreign[id] and wire[id] == nil then
+            local name, desc = "", rowText(q, id) or ""
+            pcall(function() name = q.taskNames[id + 1]:ToString() end)
+            if desc:sub(-#TAG) == TAG then desc = desc:sub(1, -#TAG - 1) end
+            if name ~= "" or desc ~= "" then
+                out[#out + 1] = { id = id, name = name, desc = desc, key = keyOf(q, id) }
+            end
+        end
+    end
+    return out
+end
+
+-- Completes an open step the way the game does: the step's own event where the game has
+-- one (it does what the step was for, an ATM switched on for example), otherwise the
+-- quest manager's own completion, which also starts what comes after it. Returns the
+-- step's name, or nil when there is no such open step.
+function Story.skip(id, expectName)
+    local q = manager()
+    if not q or type(id) ~= "number" or id < 0 or id >= length(q) or closed(q, id) then return nil end
+    local name = ""
+    pcall(function() name = q.taskNames[id + 1]:ToString() end)
+    if expectName and expectName ~= name then return nil end
+    local key = keyOf(q, id)
+    local info = key and TASKS[key] or {}
+    if info.event then
+        local ok, e = pcall(function() q[info.event](q) end)
+        log("Story: step %d (%s) skipped through %s%s", id, tostring(key), info.event, ok and "" or (": " .. tostring(e)))
+        -- (an event that found nothing to do leaves the step open)
+        Core.after(3, function()
+            if World.gone then return end
+            local now = manager()
+            if now and now:GetAddress() == q:GetAddress() and not closed(now, id) then
+                pcall(function() now:markTaskStatus(id, 1) end)
+                pushSoon()
+            end
+        end)
+    else
+        local ok, e = pcall(function() q:markTaskStatus(id, 1) end)
+        log("Story: step %d (%s) skipped%s", id, tostring(key), ok and "" or (": " .. tostring(e)))
+    end
+    if Story.own[id] then Story.own[id].eventAt = os.clock() end
+    pushSoon()
+    return name ~= "" and name or (key or ("step " .. id))
+end
+
 function Story.isApplying() return applying end
 function Story.hidden() return wire end
 -- (true as well once a guest's own level and skills are in place without a story of its own)
