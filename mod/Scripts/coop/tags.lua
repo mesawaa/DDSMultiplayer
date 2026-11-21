@@ -15,8 +15,9 @@
 --
 -- Since v0.19: a player keeps up to three tags and uses one of them at a time (a key
 -- goes to the next one while the spray marker is out); a wall keeps the tag it was sprayed
--- with. A tag is square or twice as wide as high (two squares side by side: it takes two
--- sprays of the can and twice the time). A wall can be sprayed with one, two or three
+-- with. A tag is square, twice as wide as high (two squares side by side: it takes two
+-- sprays of the can and twice the time), or large: three squares wide and two high (six
+-- sprays; the time is that of three). A wall can be sprayed with one, two or three
 -- times the paint (another key) and then lasts that many times as long. Besides the
 -- twelve paints a stroke can have any colour, given as RRGGBB.
 
@@ -35,12 +36,18 @@ local function live() return rawget(_G, "DDSMP_TAGS_GEN") == GEN end
 
 local Tags = { stats = { sprayed = 0, mirrored = 0, dressed = 0, rendered = 0, sent = 0, received = 0 } }
 
-local SIZE = 512                 -- a square drawing is SIZE x SIZE, a wide one twice as wide
+local SIZE = 512                 -- a square drawing is SIZE x SIZE; the other shapes are made of such squares
+-- The shapes of a tag, by the letter a drawing and a wall are written with: squares across
+-- and down, and how many times the points of a square one may have.
+local SHAPES = { s = { cols = 1, rows = 1, points = 1 }, w = { cols = 2, rows = 1, points = 2 }, b = { cols = 3, rows = 2, points = 4 } }
+local SHAPE_ORDER = { "s", "w", "b" }
+local SHAPE_NAMES = { "1x1", "2x1", "3x2" }
+local MAX_HOLD = 3               -- times the usual time a spray takes at most, however many squares
 local MAX_POINTS = 3000          -- in one tag, for each of its squares
 local MAX_STROKES = 300
 local MIN_W, MAX_W = 4, 80       -- stroke width, in the drawing's pixels
 local CHUNK = 2400               -- characters of a drawing per message
-local MAX_CHUNKS = 14            -- messages one drawing may come in
+local MAX_CHUNKS = 24            -- messages one drawing may come in
 local SLOTS = 3                  -- tags a player keeps
 local OWN = 6                    -- colours of their own kept in the editor
 local MAX_PAINT = 3              -- times the paint (and the time a wall lasts)
@@ -90,7 +97,8 @@ local function canPaint() return not tostring(Core.commandLine or ""):lower():fi
 
 ---------------------------------------------------------------- a drawing as text
 
--- "2s|paint.width.points;paint.width.points" (square) or "2w|..." (wide). A paint is one
+-- "2s|paint.width.points;paint.width.points" (square), "2w|..." (wide) or "2b|..."
+-- (large). A paint is one
 -- of the twelve by its number (0: the eraser) or "x" and RRGGBB; a point is four
 -- characters (twelve bits across, twelve down). "1|..." is how a drawing was written
 -- before v0.19: square, the twelve paints, three characters a point (nine bits each).
@@ -113,10 +121,16 @@ local function ownPaint(hex)
 end
 Tags.ownPaint = ownPaint
 
-local function isWide(text) return type(text) == "string" and text:sub(1, 3) == "2w|" end
-Tags.isWide = isWide
+-- The shape letter of a drawing ("s" for anything else).
+local function kindOf(text)
+    local k = type(text) == "string" and text:match("^2(%a)|") or nil
+    return SHAPES[k] and k or "s"
+end
+Tags.kindOf = kindOf
+local function squares(kind) local sh = SHAPES[kind] or SHAPES.s return sh.cols * sh.rows end
 
-local function encode(strokes, wide)
+local function encode(strokes, kind)
+    kind = SHAPES[kind] and kind or "s"
     local out = {}
     for _, s in ipairs(strokes) do
         local p = {}
@@ -128,19 +142,20 @@ local function encode(strokes, wide)
         local paint = type(s.c) == "table" and ("x" .. s.c.hex) or string.format("%d", s.c)
         out[#out + 1] = string.format("%s.%d.%s", paint, s.w, table.concat(p))
     end
-    return (wide and "2w|" or "2s|") .. table.concat(out, ";")
+    return "2" .. kind .. "|" .. table.concat(out, ";")
 end
 
--- The strokes of a drawing and whether it is a wide one, or nil when the text is not a
+-- The strokes of a drawing and its shape letter, or nil when the text is not a
 -- drawing. Whatever comes from another game is cut down to the limits here.
 local function decode(text)
     if type(text) ~= "string" then return nil end
     local head = text:match("^(%d%a?)|")
-    local per, wide = 4, false
+    local per, kind = 4, "s"
     if head == "1" then per = 3
-    elseif head == "2w" then wide = true
-    elseif head ~= "2s" then return nil end
-    local maxX, limit = (wide and 2 or 1) * SIZE - 1, MAX_POINTS * (wide and 2 or 1)
+    elseif head and #head == 2 and head:sub(1, 1) == "2" and SHAPES[head:sub(2)] then kind = head:sub(2)
+    else return nil end
+    local sh = SHAPES[kind]
+    local maxX, maxY, limit = sh.cols * SIZE - 1, sh.rows * SIZE - 1, MAX_POINTS * sh.points
     local strokes, points = {}, 0
     for part in text:sub(#head + 2):gmatch("[^;]+") do
         local c, w, p = part:match("^(x?%x+)%.(%d+)%.([%w%-_]*)$")
@@ -150,7 +165,7 @@ local function decode(text)
         elseif c then
             c = c:match("^%d+$") and math.tointeger(tonumber(c)) or nil
         end
-        if not c or not w or (type(c) == "number" and c > #PAINTS) or #strokes >= MAX_STROKES then return strokes, wide end
+        if not c or not w or (type(c) == "number" and c > #PAINTS) or #strokes >= MAX_STROKES then return strokes, kind end
         local s = { c = c, w = math.max(MIN_W, math.min(MAX_W, w)), p = {} }
         for i = 1, #p - per + 1, per do
             if points >= limit then break end
@@ -159,12 +174,12 @@ local function decode(text)
             local x, y
             if per == 3 then x, y = (v >> 9) & 511, v & 511 else x, y = (v >> 12) & 4095, v & 4095 end
             s.p[#s.p + 1] = math.min(maxX, x)
-            s.p[#s.p + 1] = math.min(SIZE - 1, y)
+            s.p[#s.p + 1] = math.min(maxY, y)
             points = points + 1
         end
         if #s.p >= 2 then strokes[#strokes + 1] = s end
     end
-    return strokes, wide
+    return strokes, kind
 end
 Tags.encode, Tags.decode = encode, decode
 
@@ -296,7 +311,7 @@ local function load()
         end
         if type(data.how) == "table" then
             for k, v in pairs(data.how) do
-                if type(k) == "string" and type(v) == "string" and v:match("^[0-3]w?$") then kept.how[k] = v end
+                if type(k) == "string" and type(v) == "string" and v:match("^[0-3]%a?$") then kept.how[k] = v end
             end
         end
         if type(data.tags) == "table" then
@@ -396,12 +411,12 @@ end
 
 -- A texture to paint into and a material that shows it. The material belongs to a decal
 -- of its own, hidden far below the ground: that actor is what keeps both alive.
-local function slotFor(key, wide)
+local function slotFor(key, kind)
     local w, player = world()
     if not w then return nil end
-    wide = wide == true
+    kind = SHAPES[kind] and kind or "s"
     local s = w.slots[key]
-    if s and s.wide == wide then return s end
+    if s and s.kind == kind then return s end
     if s then
         -- the same thing in the other shape: a texture of its own (what still shows the old
         -- one keeps it alive until it is dressed again)
@@ -416,13 +431,13 @@ local function slotFor(key, wide)
         local holder = player:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.DecalActor"),
             { X = l.X, Y = l.Y, Z = l.Z - 9000 }, { Pitch = 0, Yaw = 0, Roll = 0 })
         holder:SetActorHiddenInGame(true)
-        local rt = rendering():CreateRenderTarget2D(player, wide and SIZE * 2 or SIZE, SIZE, 2)
+        local rt = rendering():CreateRenderTarget2D(player, SHAPES[kind].cols * SIZE, SHAPES[kind].rows * SIZE, 2)
         local d = holder.Decal
         d:SetDecalMaterial(base)
         local mid = d:CreateDynamicMaterialInstance()
         mid:SetTextureParameterValue(FName("Diffuse"), rt)
         rendering():ClearRenderTarget2D(player, rt, CLEAR)
-        return { rt = rt, mid = mid, holder = holder, text = nil, wide = wide }
+        return { rt = rt, mid = mid, holder = holder, text = nil, kind = kind }
     end)
     if not ok or not made then
         log("Tags: no texture for %s: %s", tostring(key), tostring(made))
@@ -568,7 +583,7 @@ end
 -- The texture and material of a player's tag number n (painted when it is another drawing
 -- than the one there).
 local function slotOfTag(pid, tag)
-    local slot = canPaint() and slotFor(pid .. ":" .. tag.n, isWide(tag.d)) or nil
+    local slot = canPaint() and slotFor(pid .. ":" .. tag.n, kindOf(tag.d)) or nil
     if slot and slot.text ~= tag.d then
         slot.text = tag.d
         startRender(slot, decode(tag.d) or {})
@@ -577,23 +592,24 @@ local function slotOfTag(pid, tag)
 end
 
 -- How a wall was sprayed: which of the sprayer's tags (nil: not known, a wall of before
--- v0.19) and whether as a wide one.
+-- v0.19) and in which shape (its letter).
 local function howOf(key)
     local h = hows()[key]
-    if not h then return nil, false end
-    return tonumber(h:sub(1, 1)), h:sub(2, 2) == "w"
+    if not h then return nil, "s" end
+    local k = h:sub(2, 2)
+    return tonumber(h:sub(1, 1)), SHAPES[k] and k or "s"
 end
 
 -- The size of a wall's tag. The marking's picture lies turned on its side: its own Z runs
--- along the wall, its Y up the wall. A wide tag on a wall sprayed wide is twice as wide; on
--- a wall sprayed square (its tag was redrawn wide since) it keeps the width and is half as
--- high; a square tag is the square it always was. (The spray marker hands its own size on
--- to the marking; that is taken off again: it would stretch the picture the wrong way.)
-local function shape(marking, wallWide, tagWide)
-    local y, z = 1, 1
-    if tagWide then
-        if wallWide then z = 2 else y = 0.5 end
-    end
+-- along the wall, its Y up the wall. A tag on a wall sprayed in its own shape has that
+-- shape's size; on a wall sprayed in another shape (the tag was redrawn since) it is as
+-- large as fits into what was sprayed, and never larger than it is drawn. (The spray marker
+-- hands its own size on to the marking; that is taken off again: it would stretch the
+-- picture the wrong way.)
+local function shape(marking, wallKind, tagKind)
+    local wall, tag = SHAPES[wallKind] or SHAPES.s, SHAPES[tagKind] or SHAPES.s
+    local f = math.min(1, wall.cols / tag.cols, wall.rows / tag.rows)
+    local y, z = tag.rows * f, tag.cols * f
     pcall(function()
         local a = marking:GetActorScale3D()
         if math.abs(a.X - 1) + math.abs(a.Y - 1) + math.abs(a.Z - 1) > 0.01 then marking:SetActorScale3D({ X = 1, Y = 1, Z = 1 }) end
@@ -610,7 +626,7 @@ local function dress(marking, address, early)
     address = address or marking:GetAddress()
     local key = keyOf(marking)
     local pid = owners()[key] or worldOwner()
-    local n, wallWide = howOf(key)
+    local n, wallKind = howOf(key)
     local tag = tagFor(pid, n)
     w.look[address] = tag and (tag.d and ("drawing " .. tag.n .. " of " .. pid .. " (" .. #tag.d .. ")") or ("symbol " .. tostring(tag.s) .. " of " .. pid)) or ("nothing known of " .. pid)
     if tag then
@@ -623,7 +639,7 @@ local function dress(marking, address, early)
         end
         Tags.stats.dressed = Tags.stats.dressed + 1
     end
-    shape(marking, wallWide, tag ~= nil and isWide(tag.d))
+    shape(marking, wallKind, tag and tag.d and kindOf(tag.d) or "s")
     if early == nil then early = (w.dressed[address] or ""):sub(-1) == "e" end
     w.dressed[address] = pid .. "#" .. (version[pid] or 0) .. (early and "e" or "")
     if ownWorld() and (owners()[key] or hows()[key]) then kept.seen[key] = os.time() end
@@ -753,9 +769,9 @@ Net.on("tagme", function(sender, data)
             end
             if e.got < e.k then return end
             parts[id] = nil
-            local strokes, wide = decode(table.concat(e.list))
+            local strokes, kind = decode(table.concat(e.list))
             if not strokes then return end
-            text = encode(strokes, wide)
+            text = encode(strokes, kind)
         else
             text = ""
         end
@@ -820,7 +836,8 @@ local function mirror(data, pid)
     local key = wallKey(data.x, data.y, data.z)
     owners()[key] = pid ~= worldOwner() and pid or nil
     local n = math.tointeger(tonumber(data.g) or -1) or -1
-    hows()[key] = (n >= 0 and n <= SLOTS) and (n .. (data.w == 1 and "w" or "")) or nil
+    local kind = SHAPES[data.k] and data.k ~= "s" and data.k or (data.w == 1 and "w" or "")
+    hows()[key] = (n >= 0 and n <= SLOTS) and (n .. kind) or nil
     if ownWorld() then
         kept.seen[key] = os.time()
         keptDirty = true
@@ -860,7 +877,7 @@ Net.on("tagwall", function(sender, data)
         if m then Core.after(0.6, function() if Core.alive(m) then areaEffect(m) end end) end
         for id in pairs(World.inWorld) do
             if id ~= sender then
-                Net.send("tagwall", { p = pid, x = data.x, y = data.y, z = data.z, a = data.a, b = data.b, c = data.c, l = data.l, g = data.g, w = data.w }, id)
+                Net.send("tagwall", { p = pid, x = data.x, y = data.y, z = data.z, a = data.a, b = data.b, c = data.c, l = data.l, g = data.g, w = data.w, k = data.k }, id)
             end
         end
     end
@@ -876,7 +893,7 @@ Net.on("tagwalls", function(sender, data)
     end
     if type(data.h) == "table" then
         for k, v in pairs(data.h) do
-            if type(k) == "string" and type(v) == "string" and v:match("^[0-3]w?$") then session.how[k] = v end
+            if type(k) == "string" and type(v) == "string" and v:match("^[0-3]%a?$") then session.how[k] = v end
         end
     end
     if W then W.dressed = {} end
@@ -884,12 +901,37 @@ end)
 
 ---------------------------------------------------------------- the can
 
--- What the player sprays with while the game's spray marker is out: the tag in use (a
--- wide one makes the marker twice as wide: the game's own four checks of the wall then
--- stand at the wide tag's corners) and how many times the paint. A wide tag is two squares
--- and takes a spray of the can for each; twice the paint is twice that again and makes
--- the wall last twice as long.
-local spray = { want = 1, sections = 1, wide = false, uses = 0, at = 0, on = false }
+-- What the player sprays with while the game's spray marker is out: the tag in use (the
+-- marker gets the tag's shape: the game's own four checks of the wall then stand at the
+-- tag's corners) and how many times the paint. A tag takes a spray of the can for each of
+-- its squares; twice the paint is twice that again and makes the wall last twice as long.
+local spray = { want = 1, sections = 1, kind = "s", used = "s", uses = 0, at = 0, on = false }
+
+-- The game looks at the wall behind the marker's four corners only. A tag of more than one
+-- square can have a window or a door between them: the wall is looked at every half
+-- square across the whole tag, the way the game looks at the corners (a short line into
+-- the wall has to end on the outer walls' material).
+local sysLib = nil
+local function clearWall(g, sh)
+    sysLib = sysLib or StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+    local l, f, r, u = g:K2_GetActorLocation(), g.Arrow:GetForwardVector(), g:GetActorRightVector(), g:GetActorUpVector()
+    -- (the game's lines start 5 in front of the marker and go 10 into the wall)
+    local bx, by, bz = l.X + f.X * 5, l.Y + f.Y * 5, l.Z + f.Z * 5
+    for i = 0, 2 * sh.cols do
+        for j = 0, 2 * sh.rows do
+            local corner = (i == 0 or i == 2 * sh.cols) and (j == 0 or j == 2 * sh.rows)
+            if not corner then
+                local y, z = (i - sh.cols) * 50, (j - sh.rows) * 50
+                local from = { X = bx + r.X * y + u.X * z, Y = by + r.Y * y + u.Y * z, Z = bz + r.Z * y + u.Z * z }
+                local hit = {}
+                local yes = sysLib:LineTraceSingle(g, from, { X = from.X - f.X * 10, Y = from.Y - f.Y * 10, Z = from.Z - f.Z * 10 }, 1, false, {}, 0, hit, true,
+                    { R = 1, G = 0, B = 0, A = 1 }, { R = 0, G = 1, B = 0, A = 1 }, 0)
+                if yes ~= true or hit.PhysMaterial:Get():GetFName():ToString() ~= "outerWallPhysMat" then return false end
+            end
+        end
+    end
+    return true
+end
 
 -- Sprays left in all the cans the player carries.
 local function sprayUses(player)
@@ -1001,7 +1043,9 @@ local function fillRow(r)
         texts[#texts + 1] = { keyName("TagNextKey"), label }
     end
     local level = paintLevel(spray.uses, spray.sections)
-    if level == 0 then
+    if spray.blocked then
+        texts = { { "", "no room here for a tag this size" } }
+    elseif level == 0 then
         texts[#texts + 1] = { "", string.format("this tag needs %d sprays", spray.sections) }
     else
         local cost = level * spray.sections
@@ -1029,7 +1073,7 @@ Core.onTick(function()
     local player = World.player()
     local g = player and Core.enabled("Tags") and marker(player) or nil
     if not g then
-        spray.on, spray.sections, row = false, 1, nil
+        spray.on, spray.sections, spray.used, spray.blocked, row = false, 1, "s", false, nil
         return
     end
     if row and row.gizmo ~= g:GetAddress() then row = nil end
@@ -1038,7 +1082,7 @@ Core.onTick(function()
         spray.at = now
         spray.uses = sprayUses(player)
         local tag = myTag()
-        spray.wide = tag ~= nil and isWide(tag.d)
+        spray.kind = tag and tag.d and kindOf(tag.d) or "s"
     end
     spray.on = true
     local ok, e = pcall(function()
@@ -1046,10 +1090,20 @@ Core.onTick(function()
         -- (the wall of coop/wallquest.lua is painted over, not tagged: as the game has it, one
         -- spray, no tag, no coats)
         local claimed = Tags.claim and Tags.claim(g:K2_GetActorLocation()) or false
-        if spray.wide and not claimed then sections = 2 end
-        spray.sections = sections
+        local kind = claimed and "s" or spray.kind
+        local sh = SHAPES[kind]
+        sections = sh.cols * sh.rows
+        spray.sections, spray.used = sections, kind
         local a = g:GetActorScale3D()
-        if math.abs(a.Y - sections) > 0.01 then g:SetActorScale3D({ X = 1, Y = sections, Z = 1 }) end
+        if math.abs(a.Y - sh.cols) > 0.01 or math.abs(a.Z - sh.rows) > 0.01 then g:SetActorScale3D({ X = 1, Y = sh.cols, Z = sh.rows }) end
+        if sections == 1 then
+            spray.blocked = false
+        elseif now - (spray.lookedAt or 0) > 0.2 then
+            spray.lookedAt = now
+            local fine, clear = pcall(clearWall, g, sh)
+            -- (a look that fails says nothing: the game's own four corners decide)
+            spray.blocked = fine and clear == false
+        end
         if canPaint() then
             local r = buildRow(player, g)
             -- (while F is held the game's progress bar stands where the lines are; the keys do
@@ -1068,8 +1122,8 @@ Core.onTick(function()
     end
 end)
 
--- For coop/traits.lua: a wide tag takes twice as long.
-function Tags.holdFactor() return spray.on and spray.sections or 1 end
+-- For coop/traits.lua: a tag takes as many times as long as it has squares, up to MAX_HOLD.
+function Tags.holdFactor() return spray.on and math.min(MAX_HOLD, spray.sections) or 1 end
 
 -- The player's own keys, while the marker is out and nothing else has the keys.
 local function sprayPlayer()
@@ -1130,11 +1184,17 @@ Core.Hooks.add(GIZMO .. ":ActionPress", function(ctx)
         local g = ctx:get()
         local player = World.player()
         if not valid(g) or not player or g.actionHeld ~= true then return end
+        if spray.blocked then
+            g:ActionRelease()
+            local Hud = package.loaded["coop.hud"]
+            if type(Hud) == "table" and Hud.toast then Hud.toast("No room here for a tag this size: a window or a door is in the way") end
+            return
+        end
         spray.uses = sprayUses(player)
         if spray.uses >= spray.sections then return end
         g:ActionRelease()
         local Hud = package.loaded["coop.hud"]
-        if type(Hud) == "table" and Hud.toast then Hud.toast(string.format("A tag this wide takes %d sprays", spray.sections)) end
+        if type(Hud) == "table" and Hud.toast then Hud.toast(string.format("A tag this size takes %d sprays", spray.sections)) end
     end)
 end)
 
@@ -1153,11 +1213,11 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
         Tags.stats.sprayed = Tags.stats.sprayed + 1
         local tag = myTag()
         -- (as the marker was: that is what the wall was checked for)
-        local wide = spray.on and spray.sections == 2
-        -- the rest of the paint: a wide tag's second square, and everything again for
+        local kind = spray.on and spray.used or "s"
+        -- the rest of the paint: the tag's other squares, and everything again for
         -- each time more
         local player = World.player()
-        local sections = wide and 2 or 1
+        local sections = squares(kind)
         local level = 1
         if player then
             level = math.max(1, paintLevel(sprayUses(player) + 1, sections))
@@ -1172,7 +1232,7 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
         Tags.stats.paint = level
         local key = wallKey(l.X, l.Y, l.Z)
         owners()[key] = me() ~= worldOwner() and me() or nil
-        hows()[key] = (tag.n or 0) .. (wide and "w" or "")
+        hows()[key] = (tag.n or 0) .. (kind ~= "s" and kind or "")
         if ownWorld() then
             kept.seen[key] = os.time()
             keptDirty = true
@@ -1182,7 +1242,7 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
             local life = 0
             pcall(function() life = m.Lifetime end)
             for _, id in ipairs(World.targets()) do
-                Net.send("tagwall", { p = me(), x = l.X, y = l.Y, z = l.Z, a = r.Pitch, b = r.Yaw, c = r.Roll, l = life, g = tag.n or 0, w = wide and 1 or 0 }, id)
+                Net.send("tagwall", { p = me(), x = l.X, y = l.Y, z = l.Z, a = r.Pitch, b = r.Yaw, c = r.Roll, l = life, g = tag.n or 0, w = kind == "w" and 1 or 0, k = kind }, id)
             end
         end
     end)
@@ -1273,9 +1333,9 @@ end)
 local ed = nil
 local TILE, HALF = 160, 50           -- brick tile and half the height of the drawing on the wall
 local CAM_FOV = 60
--- The camera: in front of a square drawing, and further back for one twice as wide (that
--- one then fits left of the panel as well).
-local CAMS = { [false] = { back = 205, side = 34 }, [true] = { back = 289, side = 53 } }
+-- The camera: in front of a square drawing, and further back for the larger shapes (those
+-- then fit left of the panel as well).
+local CAMS = { s = { back = 205, side = 34 }, w = { back = 289, side = 53 }, b = { back = 440, side = 80 } }
 local PANEL = { x0 = 0.685, x1 = 0.975, cx = 0.83 }
 local GRID = 464                     -- what everything in the panel lines up with (k units)
 -- (the colours of the switches of coop/look.lua)
@@ -1288,8 +1348,9 @@ local UNUSED, UNUSED_EDGE = { R = 0.003, G = 0.003, B = 0.003, A = 1 }, { R = 0.
 local FIELD = { R = 0.1, G = 0.1, B = 0.1, A = 1 }
 local STRIP_W, STRIP_H, STRIP_CELL = 96, 12, 4               -- the strip of colours: its cells, their pixels
 
-local function pixelsAcross(wide) return wide and 2 * SIZE or SIZE end
-local function pointLimit(wide) return MAX_POINTS * (wide and 2 or 1) end
+local function pixelsAcross(kind) return SHAPES[kind].cols * SIZE end
+local function pixelsDown(kind) return SHAPES[kind].rows * SIZE end
+local function pointLimit(kind) return MAX_POINTS * SHAPES[kind].points end
 
 -- A linear colour (what the canvas paints with) as it is written (0-255).
 local function written(v)
@@ -1346,8 +1407,8 @@ local function cur(e) return e.work[e.n] end
 -- A tag as the editor works on it: its strokes, its shape, what UNDO goes back through,
 -- and whether it is another than the one kept.
 local function workOf(text)
-    local strokes, wide = decode(text)
-    return { strokes = strokes or {}, wide = wide == true, undo = {}, changed = false }
+    local strokes, kind = decode(text)
+    return { strokes = strokes or {}, kind = kind or "s", undo = {}, changed = false }
 end
 
 -- Typing a colour. The field has the keyboard (the game gets no keys meanwhile, as with
@@ -1416,7 +1477,7 @@ local function closeEditor(save)
         for n = 1, SLOTS do
             local wk = e.work[n]
             if wk.changed then
-                my.g[n] = #wk.strokes > 0 and encode(wk.strokes, wk.wide) or ""
+                my.g[n] = #wk.strokes > 0 and encode(wk.strokes, wk.kind) or ""
                 changed = changed + 1
             end
         end
@@ -1442,7 +1503,7 @@ local function closeEditor(save)
         end
         local wk = cur(e)
         log("Tags: tags saved (%d changed; tag %d shown, %s, %d stroke(s), %d point(s); tag %d in use: %s)", changed, e.n,
-            wk.wide and "wide" or "square", #wk.strokes, countPoints(wk.strokes), my.a, tostring(my.use))
+            SHAPE_NAMES[({ s = 1, w = 2, b = 3 })[wk.kind]], #wk.strokes, countPoints(wk.strokes), my.a, tostring(my.use))
     end
     my.w = e.width
     if type(e.paint) == "table" then my.cx = e.paint.hex else my.c, my.cx = e.paint, nil end
@@ -1484,9 +1545,10 @@ local function findSquare(e)
     if not valid(pc) then return end
     local a, b = {}, {}
     local o = e.at
-    local hw = cur(e).wide and 2 * HALF or HALF
-    local okA = pc:ProjectWorldLocationToScreen({ X = o.x, Y = o.y - hw, Z = o.z + HALF }, a, false)
-    local okB = pc:ProjectWorldLocationToScreen({ X = o.x, Y = o.y + hw, Z = o.z - HALF }, b, false)
+    local sh = SHAPES[cur(e).kind]
+    local hw, hh = sh.cols * HALF, sh.rows * HALF
+    local okA = pc:ProjectWorldLocationToScreen({ X = o.x, Y = o.y - hw, Z = o.z + hh }, a, false)
+    local okB = pc:ProjectWorldLocationToScreen({ X = o.x, Y = o.y + hw, Z = o.z - hh }, b, false)
     if okA and okB and tonumber(a.X) and tonumber(b.X) and b.X - a.X > 20 and b.Y - a.Y > 20 then
         e.rect = { x0 = a.X, y0 = a.Y, x1 = b.X, y1 = b.Y }
     end
@@ -1644,7 +1706,7 @@ local function refreshTools(e)
     local px = e.rect and (e.rect.x1 - e.rect.x0) or 300
     local _, _, _, _, _, w = pointer(e)
     -- (no larger than the room between the slider's row and the buttons)
-    local side = math.min(96 * (e.k or 1), math.max(4, e.width / pixelsAcross(wk.wide) * px * (uw / (w or 1920))))
+    local side = math.min(96 * (e.k or 1), math.max(4, e.width / pixelsAcross(wk.kind) * px * (uw / (w or 1920))))
     pcall(function()
         e.dab:SetWidthOverride(side)
         e.dab:SetHeightOverride(side)
@@ -1652,29 +1714,29 @@ local function refreshTools(e)
         if e.dabRound then e.dabBox:SetColorAndOpacity(c) else e.dabBox:SetBrushColor(c) end
     end)
     s.tint(e.eraserButton, e.eraser and Screen.GREEN or Screen.WHITE)
-    local left = pointLimit(wk.wide) - countPoints(wk.strokes) - (e.stroke and #e.stroke.p // 2 or 0)
+    local left = pointLimit(wk.kind) - countPoints(wk.strokes) - (e.stroke and #e.stroke.p // 2 or 0)
     -- how much is left is not shown (nobody gets near the limit); only that it is used up
     pcall(function() e.left:SetText(FText(left <= 0 and "OUT OF PAINT" or "")) end)
     local empty = {}
     for n = 1, SLOTS do empty[n] = #e.work[n].strokes == 0 end
     e.showTabs(e.n, empty)
-    e.showShape(wk.wide and 2 or 1)
+    e.showShape(({ s = 1, w = 2, b = 3 })[wk.kind])
 end
 
 local function repaint(e) renderNow(e.slot, cur(e).strokes) end
 
 -- The frame around the drawing, half see-through (only in the editor, to show where the
 -- tag is).
-local function drawOutline(player, slot, wide)
+local function drawOutline(player, slot, kind)
     if slot.drawn then return end
     slot.drawn = true
     white = white or asset(WHITE)
-    local across = pixelsAcross(wide)
-    local hw = wide and 2 * HALF or HALF
+    local across, down = pixelsAcross(kind), pixelsDown(kind)
+    local hw, hh = SHAPES[kind].cols * HALF, SHAPES[kind].rows * HALF
     local insetX = math.floor((1 - hw / (hw + 3)) * across / 2)
-    local insetY = math.floor((1 - HALF / (HALF + 3)) * SIZE / 2)
+    local insetY = math.floor((1 - hh / (hh + 3)) * down / 2)
     local c, t = { R = 1, G = 1, B = 1, A = 0.5 }, 3
-    local x0, x1, y0, y1 = insetX - t, across - insetX, insetY - t, SIZE - insetY
+    local x0, x1, y0, y1 = insetX - t, across - insetX, insetY - t, down - insetY
     pcall(function()
         withCanvas(player, slot.rt, function(cv)
             for _, r in ipairs({ { x0, y0, x1 - x0 + t, t }, { x0, y1, x1 - x0 + t, t }, { x0, y0, t, y1 - y0 + t }, { x1, y0, t, y1 - y0 + t } }) do
@@ -1687,28 +1749,28 @@ end
 -- The drawing on the wall and the camera, for the shape of the tag shown.
 local function arrange(e)
     local player = World.player()
-    local wide = cur(e).wide
-    local slot = slotFor(wide and "edit:w" or "edit", wide)
-    local outline = slotFor(wide and "outline:w" or "outline", wide)
+    local kind = cur(e).kind
+    local slot = slotFor("edit:" .. kind, kind)
+    local outline = slotFor("outline:" .. kind, kind)
     if not slot then error("no texture to draw on") end
     e.slot = slot
-    local hw = wide and 2 * HALF or HALF
+    local hw, hh = SHAPES[kind].cols * HALF, SHAPES[kind].rows * HALF
     pcall(function()
         local d = e.drawDecal.Decal
-        d.DecalSize = { X = 30, Y = HALF, Z = hw }
+        d.DecalSize = { X = 30, Y = hh, Z = hw }
         d:SetDecalMaterial(slot.mid)
         pcall(function() d:MarkRenderStateDirty() end)
     end)
     if outline then
-        drawOutline(player, outline, wide)
+        drawOutline(player, outline, kind)
         pcall(function()
             local d = e.outlineDecal.Decal
-            d.DecalSize = { X = 30, Y = HALF + 3, Z = hw + 3 }
+            d.DecalSize = { X = 30, Y = hh + 3, Z = hw + 3 }
             d:SetDecalMaterial(outline.mid)
             pcall(function() d:MarkRenderStateDirty() end)
         end)
     end
-    local o, cam = e.at, CAMS[wide]
+    local o, cam = e.at, CAMS[kind]
     pcall(function() e.camera:K2_SetActorLocation({ X = o.x - cam.back, Y = o.y + cam.side, Z = o.z }, false, {}, true) end)
     -- (the view follows the camera a frame later: the drawing's place is found after that)
     e.rect, e.rectAt, e.movedAt = nil, nil, os.clock()
@@ -1738,7 +1800,7 @@ local function buildStudio(e, player)
         end
     end
     for _, side in ipairs({ -1, 1 }) do
-        local c = spawn("/Script/Engine.PointLight", ox - 260, oy + side * 190 + CAMS[false].side, oz + 110).LightComponent
+        local c = spawn("/Script/Engine.PointLight", ox - 260, oy + side * 190 + CAMS.s.side, oz + 110).LightComponent
         c:SetMobility(2)
         c:SetIntensity(9000)
         c:SetAttenuationRadius(1100)
@@ -1754,7 +1816,7 @@ local function buildStudio(e, player)
     end
     e.outlineDecal = decal(1)
     e.drawDecal = decal(2)
-    local cam = spawn("/Script/Engine.CameraActor", ox - CAMS[false].back, oy + CAMS[false].side, oz)
+    local cam = spawn("/Script/Engine.CameraActor", ox - CAMS.s.back, oy + CAMS.s.side, oz)
     pcall(function()
         cam.CameraComponent:SetConstraintAspectRatio(false)
         cam.CameraComponent:SetFieldOfView(CAM_FOV)
@@ -1764,7 +1826,7 @@ local function buildStudio(e, player)
     pcall(function()
         local sound = asset(SPRAY_SOUND)
         if not sound then return end
-        local a = spawn("/Script/Engine.AmbientSound", ox - CAMS[false].back, oy + CAMS[false].side, oz)
+        local a = spawn("/Script/Engine.AmbientSound", ox - CAMS.s.back, oy + CAMS.s.side, oz)
         a.AudioComponent:Stop()
         a.AudioComponent:SetSound(sound)
         e.sound = a
@@ -1795,59 +1857,55 @@ local function toast(text)
     if type(Hud) == "table" and Hud.toast then pcall(Hud.toast, text) end
 end
 
--- The tag shown square or twice as wide. A square drawing goes into the middle of the wide
--- one; a wide one becomes square as it is when it lies within the middle square, else half
--- as large. UNDO goes back.
-local function reshape(e, wide)
+-- The tag shown in another shape. The drawing keeps its place around the middle and its
+-- size when all of it lies within the new shape; otherwise it is made as much smaller as
+-- it takes to fit the old shape into the new one. UNDO goes back.
+local function reshape(e, kind)
     local wk = cur(e)
-    if wk.wide == wide or e.stroke then return end
-    local strokes = {}
-    if wide then
-        for _, s in ipairs(wk.strokes) do
-            local p = {}
-            for i = 1, #s.p, 2 do p[i], p[i + 1] = s.p[i] + SIZE // 2, s.p[i + 1] end
-            strokes[#strokes + 1] = { c = s.c, w = s.w, p = p }
-        end
-    else
-        if countPoints(wk.strokes) > MAX_POINTS then
-            toast("Too much is drawn for a square tag")
-            return
-        end
-        -- (by the points: paint over the edge of a square is cut off there as it always was)
-        local lo, hi = math.huge, -math.huge
-        for _, s in ipairs(wk.strokes) do
-            for i = 1, #s.p, 2 do
-                lo = math.min(lo, s.p[i])
-                hi = math.max(hi, s.p[i])
-            end
-        end
-        local fits = lo >= SIZE // 2 and hi <= SIZE // 2 + SIZE - 1
-        for _, s in ipairs(wk.strokes) do
-            local p = {}
-            for i = 1, #s.p, 2 do
-                if fits then
-                    p[i], p[i + 1] = s.p[i] - SIZE // 2, s.p[i + 1]
-                else
-                    p[i], p[i + 1] = math.min(SIZE - 1, math.floor(s.p[i] / 2 + 0.5)), math.floor(s.p[i + 1] / 2 + SIZE / 4 + 0.5)
-                end
-            end
-            strokes[#strokes + 1] = { c = s.c, w = fits and s.w or math.max(MIN_W, math.floor(s.w / 2 + 0.5)), p = p }
+    if not SHAPES[kind] or wk.kind == kind or e.stroke then return end
+    if countPoints(wk.strokes) > pointLimit(kind) then
+        toast("Too much is drawn for a tag of that size")
+        return
+    end
+    local a0, d0, a1, d1 = pixelsAcross(wk.kind), pixelsDown(wk.kind), pixelsAcross(kind), pixelsDown(kind)
+    -- (by the points: paint over the edge is cut off there as it always was)
+    local loX, hiX, loY, hiY = math.huge, -math.huge, math.huge, -math.huge
+    for _, st in ipairs(wk.strokes) do
+        for i = 1, #st.p, 2 do
+            loX, hiX = math.min(loX, st.p[i]), math.max(hiX, st.p[i])
+            loY, hiY = math.min(loY, st.p[i + 1]), math.max(hiY, st.p[i + 1])
         end
     end
-    wk.undo[#wk.undo + 1] = { strokes = wk.strokes, wide = wk.wide }
-    wk.strokes, wk.wide, wk.changed = strokes, wide, true
+    local dx, dy = (a1 - a0) // 2, (d1 - d0) // 2
+    local fits = loX + dx >= 0 and hiX + dx <= a1 - 1 and loY + dy >= 0 and hiY + dy <= d1 - 1
+    local f = fits and 1 or math.min(1, a1 / a0, d1 / d0)
+    local strokes = {}
+    for _, st in ipairs(wk.strokes) do
+        local p = {}
+        for i = 1, #st.p, 2 do
+            if fits then
+                p[i], p[i + 1] = st.p[i] + dx, st.p[i + 1] + dy
+            else
+                p[i] = math.max(0, math.min(a1 - 1, math.floor((st.p[i] - a0 / 2) * f + a1 / 2 + 0.5)))
+                p[i + 1] = math.max(0, math.min(d1 - 1, math.floor((st.p[i + 1] - d0 / 2) * f + d1 / 2 + 0.5)))
+            end
+        end
+        strokes[#strokes + 1] = { c = st.c, w = fits and st.w or math.max(MIN_W, math.floor(st.w * f + 0.5)), p = p }
+    end
+    wk.undo[#wk.undo + 1] = { strokes = wk.strokes, kind = wk.kind }
+    wk.strokes, wk.kind, wk.changed = strokes, kind, true
     arrange(e)
     repaint(e)
     refreshTools(e)
 end
-Tags.reshape = function(wide) if ed then reshape(ed, wide) end end
+Tags.reshape = function(kind) if ed then reshape(ed, kind) end end
 
 local function undo(e)
     local wk = cur(e)
     local last = table.remove(wk.undo)
     if last and not last.stroke then
-        local reshaped = last.wide ~= wk.wide
-        wk.strokes, wk.wide = last.strokes, last.wide
+        local reshaped = last.kind ~= wk.kind
+        wk.strokes, wk.kind = last.strokes, last.kind
         if reshaped then arrange(e) end
     elseif #wk.strokes > 0 then
         -- (a stroke of this session, or one of the tag as it was kept)
@@ -1863,7 +1921,7 @@ end
 local function clear(e)
     local wk = cur(e)
     if #wk.strokes == 0 then return end
-    wk.undo[#wk.undo + 1] = { strokes = wk.strokes, wide = wk.wide }
+    wk.undo[#wk.undo + 1] = { strokes = wk.strokes, kind = wk.kind }
     wk.strokes, wk.changed = {}, true
     repaint(e)
     refreshTools(e)
@@ -1943,7 +2001,7 @@ function Tags.openEditor(n)
     local tabs, showTabs = switchRow(s, { "TAG 1", "TAG 2", "TAG 3" }, GRID * k, 44 * k, 18 * k, function(i) showTag(e, i) end)
     put(tabs, 0, yTabs)
     e.showTabs = showTabs
-    local shape, showShape = switchRow(s, { "1x1", "2x1" }, GRID * k, 40 * k, 18 * k, function(i) reshape(e, i == 2) end)
+    local shape, showShape = switchRow(s, SHAPE_NAMES, GRID * k, 40 * k, 18 * k, function(i) reshape(e, SHAPE_ORDER[i]) end)
     put(shape, 0, yShape)
     e.showShape = showShape
 
@@ -2042,11 +2100,11 @@ local function strokeTo(e, cx, cy)
     local s = e.stroke
     local wk = cur(e)
     local n = #s.p
-    cx = math.max(0, math.min(pixelsAcross(wk.wide) - 1, math.floor(cx + 0.5)))
-    cy = math.max(0, math.min(SIZE - 1, math.floor(cy + 0.5)))
+    cx = math.max(0, math.min(pixelsAcross(wk.kind) - 1, math.floor(cx + 0.5)))
+    cy = math.max(0, math.min(pixelsDown(wk.kind) - 1, math.floor(cy + 0.5)))
     local x0, y0 = s.p[n - 1], s.p[n]
     if n > 0 and (cx - x0) ^ 2 + (cy - y0) ^ 2 < 9 then return end
-    if countPoints(wk.strokes) + n // 2 >= pointLimit(wk.wide) then return end
+    if countPoints(wk.strokes) + n // 2 >= pointLimit(wk.kind) then return end
     s.p[n + 1], s.p[n + 2] = cx, cy
     local player = World.player()
     pcall(function()
@@ -2130,9 +2188,9 @@ local function editorTick(at)
     end
     local r = e.rect
     local wk = cur(e)
-    local across = pixelsAcross(wk.wide)
-    local cx, cy = (x - r.x0) / (r.x1 - r.x0) * across, (y - r.y0) / (r.y1 - r.y0) * SIZE
-    local inside = cx >= 0 and cx < across and cy >= 0 and cy < SIZE
+    local across, tall = pixelsAcross(wk.kind), pixelsDown(wk.kind)
+    local cx, cy = (x - r.x0) / (r.x1 - r.x0) * across, (y - r.y0) / (r.y1 - r.y0) * tall
+    local inside = cx >= 0 and cx < across and cy >= 0 and cy < tall
     if down and not e.wasDown then
         e.drag = nil
         if inside then
@@ -2449,7 +2507,7 @@ end
 local SYMBOL_TEX = { "/Game/Textures/Decals/WallSpraySymbols/wallSprayedSymbol-%02d.wallSprayedSymbol-%02d",
     "/Game/Textures/Decals/WallSpraySymbols/wallSpraySymbol-%02d.wallSpraySymbol-%02d" }
 local DISC = { w = 500, c = { 0.035, 0.035, 0.045 }, p = { 256, 256 } }
-local WIDE_FIT = 0.45       -- a wide tag on the round picture: this much of its size, in the middle
+local WIDE_FIT = 0.9        -- a tag that is not square on the round picture: its longer side is this much of the picture's
 function Tags.pictureOf(pid)
     pid = tostring(pid or me())
     local tag = tagOf(pid)
@@ -2463,15 +2521,17 @@ function Tags.pictureOf(pid)
         slot.text = key
         if tag.d then
             local strokes = { DISC }
-            local drawn, wide = decode(tag.d)
+            local drawn, kind = decode(tag.d)
+            local sh = SHAPES[kind or "s"]
+            local fit = WIDE_FIT / math.max(sh.cols, sh.rows)
             for _, s in ipairs(drawn or {}) do
-                if wide then
+                if kind ~= "s" then
                     local p = {}
                     for i = 1, #s.p, 2 do
-                        p[i] = (s.p[i] - SIZE) * WIDE_FIT + SIZE / 2
-                        p[i + 1] = (s.p[i + 1] - SIZE / 2) * WIDE_FIT + SIZE / 2
+                        p[i] = (s.p[i] - sh.cols * SIZE / 2) * fit + SIZE / 2
+                        p[i + 1] = (s.p[i + 1] - sh.rows * SIZE / 2) * fit + SIZE / 2
                     end
-                    s = { c = s.c, w = math.max(2, s.w * WIDE_FIT), p = p }
+                    s = { c = s.c, w = math.max(2, s.w * fit), p = p }
                 end
                 strokes[#strokes + 1] = s
             end

@@ -558,6 +558,14 @@ Core.every(1, function()
     end
 end)
 
+-- A save loaded from inside the game: the level stays, so what was built is taken away
+-- (it is built again for the new player).
+World.listen("loading", function()
+    if not live() or not built then return end
+    local player = World.player()
+    if player and player:GetAddress() == built.owner then clear() else built = nil end
+end)
+
 function Boutique.shutdown()
     clear()
     if marker then pcall(Hud.forgetMarker, marker) end

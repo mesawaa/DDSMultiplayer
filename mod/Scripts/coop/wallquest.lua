@@ -26,7 +26,7 @@
 --      sprays once the game lets them (its story switches spraying on).
 --   4  tell Olivia. She mixed the blue for Amy when they were best friends and swore
 --      nobody else would wear it; Amy swore she would stay clean and broke that first, so
---      Olivia's promise is off. (They are still angry with each other: the user's word.)
+--      Olivia's promise is off. (They are still angry with each other.)
 --   5  done: Blue is among Olivia's colours.
 --
 -- The goal of the moment is shown the way the game shows a task: its banner, a task

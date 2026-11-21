@@ -229,8 +229,8 @@ end
 -- `unlockAtm` on every atmMachine, then bankWasIntroduced). With one storyline for
 -- everybody the step runs in one game and arrives in the others as task table and quest
 -- variables only: their machines stayed out of order, "Check out the ATM" could not be
--- done there, and the step never runs again once bankWasIntroduced is set (reported with
--- 0.18.0, Sync.Story off). So in every game, once this game's quest manager says the bank
+-- done there, and the step never runs again once bankWasIntroduced is set (with
+-- Sync.Story off). So in every game, once this game's quest manager says the bank
 -- was introduced, every machine still switched off is switched on as the game does it.
 -- Independent of Sync.Story: with separate storylines bankWasIntroduced is the player's own.
 local ATM = "/Game/Interactive/atmMachine.atmMachine_C"

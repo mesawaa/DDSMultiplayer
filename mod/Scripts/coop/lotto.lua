@@ -36,8 +36,8 @@ local Lotto = { stats = { converted = 0, scratched = 0, won = 0, cashed = 0 } }
 -- is a ticket instead; of the tickets, this share is fresh (the rest are used).
 Lotto.LOOT_SHARE = 0.12
 Lotto.FRESH_SHARE = 0.15
--- What a fresh ticket turns out to be (the user's numbers, from Hobo: Tough Life).
--- The two big prizes (the user's numbers, 2026-11-18: 3% and 1%) come out of the winning
+-- What a fresh ticket turns out to be (the odds are those of Hobo: Tough Life).
+-- The two big prizes (3% and 1%) come out of the winning
 -- tickets' share: six in ten still lose, the three small prizes each gave up a tenth.
 Lotto.ODDS = { { p = 0.6000, win = 0 }, { p = 0.1170, win = 10 }, { p = 0.1053, win = 20 }, { p = 0.1377, win = 30 }, { p = 0.0300, win = 100 }, { p = 0.0100, win = 500 } }
 Lotto.AMOUNTS = { 10, 20, 30, 100, 500 }                   -- what a ticket can win
@@ -117,17 +117,16 @@ local function asset(path)
     return nil
 end
 
-local textures = {}           -- file name -> Texture2D (made once per game start)
-
+-- A picture, read from its file every time it is asked for. It must not be kept here for
+-- later: the engine throws a picture away at its next clean-up once nothing of the game's
+-- own holds it (a ticket screen that was closed, a ticket model that was picked up), a
+-- pointer kept in Lua still looks valid afterwards, and using it crashes the game.
 local function texture(name)
-    local t = textures[name]
-    if valid(t) then return t end
     local ok, made = pcall(function()
         local KRL = StaticFindObject("/Script/Engine.Default__KismetRenderingLibrary")
         return KRL:ImportFileAsTexture2D(World.player() or KRL, DIR .. name .. ".png")
     end)
     if ok and valid(made) then
-        textures[name] = made
         return made
     end
     log("Lotto: picture %s could not be loaded: %s", name, tostring(made))
@@ -183,23 +182,18 @@ local FLAT = "/Engine/EngineMaterials/FlatNormal.FlatNormal"
 -- A ticket is 10 x 14.6 cm (the picture's proportions), a card's thickness.
 Lotto.MODEL = { x = 0.1, y = 0.146, z = 0.003, lift = 0.4, yaw = 90 }
 
-local materials = { owner = nil }     -- kind key -> material (made per world)
-
+-- (a material of its own for every ticket model: one kept here for the next model is
+-- thrown away by the engine once no model wears it, see `texture`)
 local function materialFor(kind, player)
-    local owner = player:GetAddress()
-    if materials.owner ~= owner then materials = { owner = owner } end
-    local m = materials[kind.key]
-    if valid(m) then return m end
     local base, pic = asset(SKIN), texture(kind.picture)
     if not base or not pic then return nil end
     local KML = StaticFindObject("/Script/Engine.Default__KismetMaterialLibrary")
-    m = KML:CreateDynamicMaterialInstance(player, base, FName("None"))
+    local m = KML:CreateDynamicMaterialInstance(player, base, FName("None"))
     if not valid(m) then return nil end
     m:SetTextureParameterValue(FName("Albedo"), pic)
     local black, flat = asset(BLACK), asset(FLAT)
     if black then m:SetTextureParameterValue(FName("Tint Mask"), black) end
     if flat then m:SetTextureParameterValue(FName("Normal"), flat) end
-    materials[kind.key] = m
     return m
 end
 
@@ -1335,10 +1329,7 @@ local function pay(player, amount)
     pcall(function() player:addMoney(amount, true, {}) end)
     local missing = amount - (cash() - before)
     if missing > 0 then
-        pcall(function()
-            local computer = Core.find("mainComputer_C")
-            computer.playerBankMoney = computer.playerBankMoney + missing
-        end)
+        Hud.bankTransfer(true, missing, "Scratch ticket prize", "LOTTERY")
         Hud.toast(string.format("$%d went to your bank account: your pockets are full", missing), 5)
     end
 end

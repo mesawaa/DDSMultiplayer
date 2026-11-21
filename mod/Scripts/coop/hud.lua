@@ -445,4 +445,25 @@ end)
 
 function Hud.state() return st end
 
+-- Money into or out of the bank account the way the game does it: the balance changes
+-- and the transfer is in the account's history (title and source as the game's own
+-- transfers have them). False when it could not be done.
+function Hud.bankTransfer(income, amount, title, source)
+    local computer = Core.find("mainComputer_C")
+    if not computer or amount <= 0 then return false end
+    local before = nil
+    pcall(function() before = computer.playerBankMoney end)
+    if type(before) ~= "number" then return false end
+    local ok = pcall(function() computer:newBankOperation(income == true, amount, FText(tostring(title)), FText(tostring(source)), false, true) end)
+    local after = before
+    pcall(function() after = computer.playerBankMoney end)
+    -- (the balance says whether the game's function ran)
+    if not ok or math.abs(after - before) < 0.005 then
+        local set = pcall(function() computer.playerBankMoney = before + (income and amount or -amount) end)
+        if not set then return false end
+    end
+    pcall(function() if Core.valid(computer.interface) then computer.interface:UpdateDesktop() end end)
+    return true
+end
+
 return Hud

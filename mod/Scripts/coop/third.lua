@@ -34,6 +34,9 @@ local Third = { on = false }
 Third.tune = {
     walk = { back = 165, side = 40, up = 80 },
     emote = { back = 235, side = 0, up = 35 },
+    -- seated at the card table: from behind and above the own chair, far enough back for
+    -- the players on the seats to the left and right to be in the picture
+    seat = { back = 130, side = 0, up = 65 },
     wall = 14,          -- kept between the camera and what is in its way
     hideUnder = 95,     -- nearer than this to the figure, the figure is not drawn (its head would fill the view)
     ease = 6,           -- how fast the camera goes back out once the way is free
@@ -71,6 +74,9 @@ local function emoting()
 end
 
 local function wanted(player)
+    -- (Third.force: a place of the mod's own asks for the view from behind, by the name of
+    -- its shape in Third.tune; its screen has `keepView`)
+    if Third.force then return not occupied(player) end
     if Avatar.noEmoteView then return false end
     if not Third.on and not (emoting() and Core.config.EmoteThirdPerson ~= false) then return false end
     return not occupied(player)
@@ -105,7 +111,7 @@ end
 
 local function place(r, player, dt, snap)
     local t = Third.tune
-    local shape = emoting() and t.emote or t.walk
+    local shape = (Third.force and t[Third.force]) or (emoting() and t.emote or t.walk)
     local l = player:K2_GetActorLocation()
     local rot = r.pc:GetControlRotation()
     local pitch, yaw = math.rad(rot.Pitch), math.rad(rot.Yaw)
@@ -150,11 +156,25 @@ local function leave(giveViewBack)
             r.pc:SetViewTargetWithBlend(player, 0.2, 0, 0, false)
         end
     end)
-    pcall(function() if same and r.arms then player.fpsArms:SetVisibility(true, true) end end)
     pcall(function() if valid(r.pc) then r.pc:K2_DetachFromActor(1, 1, 1) end end)
     local camera, figure = r.camera, r.figure
+    -- The game's first-person body (a whole figure, of which the player sees the arms) is
+    -- shown again only when the view is back at the head: on the way there it would be
+    -- seen from outside, standing in the player's own figure.
+    local function showArms()
+        if not (same and r.arms) then return end
+        if rig then
+            rig.arms = true     -- third person again already: this one puts them back
+            return
+        end
+        pcall(function()
+            local now = World.player()
+            if now and address(now) == r.owner then now.fpsArms:SetVisibility(true, true) end
+        end)
+    end
     local function clear()
         if World.gone then return end
+        showArms()
         pcall(Avatar.destroyStandIn, figure)
         pcall(function() if valid(camera) then camera:K2_DestroyActor() end end)
     end
@@ -268,6 +288,11 @@ World.listen("stop", function()
     if not live() then return end
     leave(true)
     Third.on = false        -- (every world starts in the game's own view)
+end)
+
+-- (a save loaded from inside the game: the level stays, the player is replaced)
+World.listen("loading", function()
+    if live() then leave(true) end
 end)
 
 function Third.shutdown() leave(true) end

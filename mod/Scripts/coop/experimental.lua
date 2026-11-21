@@ -26,6 +26,8 @@ local log = Core.log
 local Experimental = {}
 
 Experimental.FEATURES = {
+    -- coop/dance.lua: without it the club's dance floor stays black and white
+    { key = "DanceFloor", name = "DANCE FLOOR LIGHTS", desc = "The club's dance floor lights up in colours while somebody stands on it.", live = true },
     -- coop/stack.lua (only the player who climbs needs it on)
     { key = "PlayerStacking", name = "STAND ON OTHER PLAYERS", desc = "Jump onto a crouching player; when they stand up you are higher up the wall.",
         live = true, apply = function(on)
@@ -47,7 +49,6 @@ Experimental.FEATURES = {
         end },
 }
 
-Experimental.WARNING = "Not fully tested. These can break a game or a save; switch one off again if something goes wrong."
 Experimental.NONE = "No experimental features in this version."
 
 local function feature(key)
@@ -98,9 +99,6 @@ function Experimental.page(ui)
         ui.emptyLine(inner, Experimental.NONE)
         return
     end
-    local warning = scr.text(Experimental.WARNING, "small", 15, ui.YELLOW)
-    pcall(function() warning:SetAutoWrapText(true) end)
-    ui.put(inner, warning, 12)
     local file = ui.file and ui.file() or nil
     local inFile = file and type(file.Experimental) == "table" and file.Experimental or nil
     for _, f in ipairs(Experimental.FEATURES) do

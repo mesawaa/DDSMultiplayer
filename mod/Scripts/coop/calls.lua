@@ -6,8 +6,7 @@
 -- ends: the phone runs the quest manager's function named in onAnswer / onEnd, which adds
 -- the task and only then notes that the call has been heard (`eddieCalls[n]`). With one
 -- storyline that note is shared, but it comes too late for a game whose own call is
--- already ringing: both calls ended, and the task was there twice (reported with 0.18.0,
--- "some phone calls that we get from Eddie ... will give duplicated tasks").
+-- already ringing: both calls ended, and the task was there twice.
 --
 -- So a call is claimed when it starts to ring. The host keeps who has which call (by the
 -- name of what it runs). The first player to ask has it; in every other game the same

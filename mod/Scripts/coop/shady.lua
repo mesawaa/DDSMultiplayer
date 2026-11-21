@@ -5,7 +5,7 @@
 --     symbol they chose). It is
 --     picked with PICTURE under the player's name at the top of the left column, and is
 --     kept with the player's character in the world (coop/guests.lua: per save).
---   * The player's own row at the top shows it, and their level. The bar at the top says
+--   * The player's own row at the top shows it (no level: the wallet's balance is there). The bar at the top says
 --     "Loged in as" with the player's Steam name in place of the game's made-up one.
 --   * Above the contacts stands PLAYERS: everybody else who has a character in this world,
 --     with their picture, their level, and where they are: the part of town a player in
@@ -543,19 +543,6 @@ local function attach(ui)
     local pc = player:GetController()
     local at = { X = 80, Y = 18 }
     pcall(function() local p = a.nameBox.Slot:GetPosition() at = { X = p.X, Y = p.Y } end)
-    -- the level, at the right edge of the column, on the name's line
-    pcall(function()
-        local t = StaticConstructObject(StaticFindObject("/Script/UMG.TextBlock"), ui.WidgetTree)
-        t:SetFont(ui.txtUserMainName.Font)
-        t:SetColorAndOpacity({ SpecifiedColor = { R = 0.55, G = 0.55, B = 0.55, A = 1 }, ColorUseRule = 0 })
-        t:SetVisibility(NO_HIT)
-        local slot = panel:AddChildToCanvas(t)
-        slot:SetAnchors({ Minimum = { X = 1, Y = 0 }, Maximum = { X = 1, Y = 0 } })
-        slot:SetAlignment({ X = 1, Y = 0 })
-        slot:SetAutoSize(true)
-        slot:SetPosition({ X = -18, Y = at.Y })
-        a.level = t
-    end)
     -- PICTURE, under the name: one of the game's small buttons
     pcall(function()
         local lib = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
@@ -735,11 +722,6 @@ Core.every(0.5, function()
     if att.shown ~= key then
         if show(att.image, resource(pic, myId(), face)) then att.shown = key end
         pcall(function() if ui.curSelectedUser >= 0 then paintMessages(ui) end end)
-    end
-    local level = "lvl " .. myLevel()
-    if att.levelText ~= level then
-        att.levelText = level
-        pcall(function() att.level:SetText(FText(level)) end)
     end
     -- the list is drawn anew when somebody's picture, level or presence changes
     local sig = signature(others)

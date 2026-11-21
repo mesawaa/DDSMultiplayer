@@ -114,8 +114,8 @@ end
 -- people onto the street afterwards is its timer (`refreshCitizenStatus`, every 11.32 s),
 -- which asks nothing: a game that was not to populate the street still made somebody every
 -- eleven seconds, and the mod took them away again a third of a second later, close enough
--- to the player to be seen coming and going (measured: 28 in four minutes, some 9 m away;
--- reported as people "spawning right in front of us"). So the timer itself is stopped, and
+-- to the player to be seen coming and going (measured: 28 in four minutes, some 9 m away).
+-- So the timer itself is stopped, and
 -- started again when this game is to populate the street.
 local CITIZEN_TIMER, CITIZEN_EVERY = "refreshCitizenStatus", 11.32
 local citizenTimerOff = nil     -- the population manager whose timer we stopped
@@ -746,8 +746,7 @@ end
 -- one of them decides to search the player (the base class's, hooked above, is empty and
 -- never runs for them). Without these two a copied officer announced the search in this
 -- game ("stand still"), was not driven here, kept walking after its original, and the game
--- took the growing distance for the player running away (reported with v0.15.1: "the cops
--- keep walking away and count that as her fleeing").
+-- took the growing distance for the player running away.
 Core.Hooks.add("/Game/Skeletal/NPC/Policeman/PM_PatrolLead.PM_PatrolLead_C:EngageSuspect", onSuspicion)
 Core.Hooks.add("/Game/Skeletal/NPC/Policeman/PM_PatrolPartner.PM_PatrolPartner_C:EngageSuspect", onSuspicion)
 

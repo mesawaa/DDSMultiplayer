@@ -421,6 +421,10 @@ end
 
 pcall(RegisterHook, "/Script/RamaSaveSystem.RamaSaveLibrary:RamaSave_LoadFromFile", function(_, ...)
     local j = World.joining
+    -- A save loaded from inside a game keeps the level and replaces the player: what the
+    -- mod has built for the old player is still there, and is taken away now, while it
+    -- can still be told whose it is.
+    if Core.player() then fire("loading") end
     Core.flush(15)                               -- the world's objects are being replaced
     World.epoch = World.epoch + 1
     World.loadStartedAt = os.clock()

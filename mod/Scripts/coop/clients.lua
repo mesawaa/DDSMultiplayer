@@ -1,7 +1,7 @@
 -- Clients and dealers that have stopped answering: REPAIR on the MOD OPTIONS page.
 --
--- Reported with 0.18.0: "a dealer being stuck in limbo. He asked for product, was
--- delivered, but he never texted to tell us to pick up cash." What a client or a dealer
+-- A dealer can take his product and then never say that the cash is ready.
+-- What a client or a dealer
 -- does next is one thing in the game: the sales manager counts every client's
 -- `clientsOrderCountdown` down, and at 0 the client orders, or a dealer who has taken his
 -- product (`clientDealerTookDope`) says that the cash is ready. A client is left out of

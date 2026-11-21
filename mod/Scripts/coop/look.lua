@@ -649,13 +649,17 @@ local function bank()
     return 0, nil
 end
 
-local function pay(price)
+-- The shop's name as the bank account's history has it.
+local function payee()
+    local store = Look.store
+    return string.upper(tostring(store and store.STORE or "Marco's Clothing"))
+end
+
+local function pay(price, what)
     if price <= 0 then return true end
     local money, computer = bank()
     if not computer or money < price then return false end
-    computer.playerBankMoney = money - price
-    pcall(function() if valid(computer.interface) then computer.interface:UpdateDesktop() end end)
-    return true
+    return Hud.bankTransfer(false, price, what or "Payment", payee())
 end
 
 -- The clothes shops: Marco's corner at Donald's (coop/clerk.lua) and the formal store
@@ -1519,14 +1523,14 @@ renderShop = function()
         if it.other then
             local o = it.other
             buttons[1] = { "BUY", function()
-                if not pay(o.price) then
+                if not pay(o.price, o.name) then
                     Hud.toast(string.format("Not enough money in the bank for this ($%d)", o.price), 4)
                     return
                 end
                 local ok, done = pcall(o.deliver)
                 if not ok or not done then
                     -- (nothing handed over: the money goes back)
-                    pcall(function() local m, c = bank() c.playerBankMoney = m + o.price end)
+                    Hud.bankTransfer(true, o.price, "Refund: " .. tostring(o.name), payee())
                     log("Could not hand over %s: %s", o.name, tostring(done))
                 end
                 renderShop()
@@ -1551,7 +1555,7 @@ renderShop = function()
         end
         buttons[#buttons + 1] = { label, function()
             if not it.owned then
-                if not pay(it.price) then
+                if not pay(it.price, it.name) then
                     Hud.toast(string.format("Not enough money in the bank for this ($%d)", it.price), 4)
                     return
                 end
@@ -1798,7 +1802,7 @@ renderBarber = function()
     local payButton = scr.bigButton(total > 0 and string.format("PAY $%d", total) or (differs and "APPLY" or "NOTHING CHANGED"), 1.5, function()
         local cost = barberCost()
         if not barberDiffers() then return end
-        if cost > 0 and not pay(cost) then
+        if cost > 0 and not pay(cost, "Hair and beard") then
             Hud.toast(string.format("Not enough money in the bank for this ($%d)", cost), 4)
             return
         end
@@ -2277,8 +2281,8 @@ Core.every(1, function()
     -- A guest's own level and skills are put in place a few seconds after the join
     -- (coop/story.lua). Until then the game holds the host's, and what the character can do
     -- (stamina, speed, pockets, lock picking, stealth) was worked out from those: it is
-    -- worked out again once the guest's own are there (reported with v0.15.1: after a
-    -- rejoin a guest's skills "look identical to the host's").
+    -- worked out again once the guest's own are there (otherwise, after a
+    -- rejoin, a guest's skills are the host's).
     local story = package.loaded["coop.story"]
     local settled = World.role ~= "guest" or (story ~= nil and story.isReady() == true)
     if settled ~= traitsSettled then

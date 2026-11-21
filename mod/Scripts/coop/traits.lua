@@ -59,7 +59,7 @@ Core.onTick(function()
         usualHold = v
     end
     local c = Look.active()
-    -- (a tag twice as wide takes twice as long: coop/tags.lua)
+    -- (a tag of more than one square takes longer: coop/tags.lua)
     local wide = 1
     pcall(function() wide = package.loaded["coop.tags"].holdFactor() or 1 end)
     local want = usualHold * ((c and c.tagTime) or 1) * wide

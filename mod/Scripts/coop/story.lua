@@ -1138,8 +1138,8 @@ end)
 -- settings say: coop/sync.lua never exchanges them. Everything above puts a guest's own
 -- in place and stores them with the host, and all of it is off when Sync.Story (or
 -- Sync.Orders) is switched off. A guest then had, in every session anew, what the host's
--- save holds, the host's level and skills, and what they spent was gone with the session
--- (reported with v0.15.1: "her skills reset and look identical to the hosts"). In that
+-- save holds, the host's level and skills, and what they spent was gone with the session.
+-- In that
 -- case these few variables are kept by themselves: sent to the host when they change,
 -- stored in the guest's record beside the host's saves (`sheet`, coop/guests.lua), and put
 -- back on arrival. A guest the host has nothing for starts from what the host's save

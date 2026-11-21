@@ -270,7 +270,7 @@ Core.every(LOOK_EVERY, function()
 end)
 
 -- Diana Fisk (the deco shop) walks, and the armchair right behind her lets a nudge step her
--- up onto its seat, where she stays. (The game's own doing; seen by the user 2026-11-16.)
+-- up onto its seat, where she stays. (The game's own doing.)
 -- When she stands well above the spot she started on, she is put back there.
 local DIANA = "/Game/GUI/EquipmentShopping/shopOwnerDecorations.shopOwnerDecorations_C"
 local diana = { address = nil, home = nil, highSince = nil }
@@ -302,7 +302,7 @@ Core.every(2, function()
 end)
 
 -- Amy Schrader (the gas station) stands behind her counter, and gets pushed off her spot
--- (seen by the user 2026-11-17: she ended up in the folding chair beside her, 67 away, and
+-- (she has ended up in the folding chair beside her, 67 away, and
 -- the save kept her there). When she has been away from her spot for a few seconds and
 -- nobody is talking to her or standing on it, she is put back the way a new game has her.
 local AMY = "/Game/Skeletal/NPC/ShopOwners/Amy/npcAmy.npcAmy_C"

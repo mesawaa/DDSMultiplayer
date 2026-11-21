@@ -62,10 +62,14 @@ return {
     Casino = true,
     -- true: the club lets everybody in at any hour, not only from 20:00 to 05:00.
     CardRoomAlwaysOpen = false,
-    -- Seconds the lounge's sofas and tables stay away after a player gets up from the card
-    -- table. (The player stands where a sofa is; the furniture comes back after this time
-    -- and once the player has stepped out of it.)
+    -- Seconds the sofa behind a player's chair stays away after they get up from the card
+    -- table. (The player stands where it is; it comes back after this time and once the
+    -- player has stepped out of it.)
     CardRoomStandUpSeconds = 3,
+    -- At the card table you look on from behind your own chair, with the players on the
+    -- other seats in the picture. false: the view from the seat itself (dealer and felt).
+    -- The mouse wheel goes from one to the other; this is the one you start with.
+    CardRoomBehindView = true,
     -- Switch between the first-person view and a view from close behind your character.
     ThirdPersonKey = "P",
     -- While the spray marker is on a wall: the next of your own tags (you can keep three),
@@ -76,6 +80,22 @@ return {
     -- false: an emote does not switch to that view by itself.
     EmoteThirdPerson = true,
     CasinoBets = { 50, 100, 250, 500, 1000, 2500 },
+    -- What a spin at the club's slot machines can cost.
+    SlotBets = { 10, 25, 50, 100, 250, 500 },
+    -- Edwin behind the club's bar puts on a song a player picks, for this much. false: no Edwin.
+    ClubSongs = true,
+    ClubSongPrice = 20,
+    -- Poker with La Ballena at his table in the club (Texas hold'em, no limit). false: off.
+    Poker = true,
+    -- The small and the big blind, and the sums of chips a player can buy.
+    PokerBlinds = { 25, 50 },
+    PokerBuyIns = { 500, 1000, 2500, 5000 },
+    -- What La Ballena starts every night with (never added to what he had). He puts as much
+    -- on the table as the player with the most chips has. When he has lost it all he plays
+    -- no more that night. If he had also won at least this much from the players that night
+    -- (and so lost twice as much in all), he closes the club for the night and everybody in
+    -- it stands outside. (In a shared world the host's numbers count.)
+    PokerNightLimit = 5000,
 
     -- Maximum players in a lobby (2-16).
     MaxPlayers = 4,

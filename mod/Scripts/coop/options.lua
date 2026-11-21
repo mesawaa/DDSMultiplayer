@@ -147,6 +147,10 @@ local function busyFlag(p)
     end
     local Casino = package.loaded["coop.casino"]
     if type(Casino) == "table" and Casino.seated then return "card table" end
+    local Slots = package.loaded["coop.slots"]
+    if type(Slots) == "table" and Slots.seated then return "slot machine" end
+    local Poker = package.loaded["coop.poker"]
+    if type(Poker) == "table" and Poker.seated then return "poker table" end
     return nil
 end
 
@@ -217,8 +221,7 @@ local CONFIG = Core.MOD_DIR .. "/Scripts/config.lua"
 -- `zero` = what 0 means; `desc` = grey words under the name; `warn` = yellow words on a
 -- group's title line, after its grey words.
 local SETTINGS = {
-    -- (the user: the storyline switch near the top, "it should be known that turning off is
-    -- how quests will be shared")
+    -- the storyline switch is near the top: switching it off is how quests are shared
     { group = "STORY", note = "after a restart; every player the same" },
     { key = "Story", sync = true, name = "Independent story",
         desc = "ON: every player has their own quests and level of the story. OFF: one storyline for everybody, the quests are shared." },
@@ -639,7 +642,7 @@ render = function()
     local ls = column:AddChildToVerticalBox(scr.sized(scrollBox, over and W + BAR or W, math.floor(H * 0.6)))
     scr.list, scr.listTab, scr.listInner, scr.listHeight = scrollBox, Options.tab, inner, math.floor(H * 0.6)
 
-    -- (the user: "show toast that settings are only for host")
+    -- guests are told once that the settings are the host's
     if Options.tab == "settings" and scr.toldTab ~= "settings" and World.active and World.role == "guest" then
         pcall(Hud.toast, "Settings are the host's: changed here, most of them only count when you host", 6)
     end

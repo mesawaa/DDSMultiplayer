@@ -58,7 +58,7 @@ local MESH = {
     dresser = "/Game/StaticMeshes/Furniture/SM_Classic_Commode_2.SM_Classic_Commode_2",
     stool = "/Game/AssetPacks/ModernKitchen/StaticMeshes/CounterStool.CounterStool",
     -- posters the furniture seller of sector C has (80 wide, 112 high, flat, their picture to -X)
-    -- (the user's choice: the waterfall and "with a friend" beside the mirror, left to right
+    -- (the waterfall and "with a friend" hang beside the mirror, left to right
     -- as seen from the room; none on the other walls)
     waterfall = "/Game/StaticMeshes/Posters/decoPosterMesh_Poster03.decoPosterMesh_Poster03",
     friend = "/Game/StaticMeshes/Posters/decoPosterMesh_Poster01.decoPosterMesh_Poster01",
@@ -387,6 +387,14 @@ Core.every(1, function()
     if Hud.ready() and (not marker or not Core.alive(marker)) then
         marker = Hud.mapMarker(Barber.STORE, "Haircuts, colour and beards", (ROOM.x0 + ROOM.x1) / 2, (ROOM.y0 + ROOM.y1) / 2, FLOOR, Hud.MARKER_SHOP)
     end
+end)
+
+-- A save loaded from inside the game: the level stays, so what was built is taken away
+-- (it is built again for the new player).
+World.listen("loading", function()
+    if not live() or not built then return end
+    local player = World.player()
+    if player and player:GetAddress() == built.owner then clear() else built = nil end
 end)
 
 function Barber.shutdown()

@@ -111,9 +111,70 @@ Avatar.EMOTES = {
 -- this animation without any shift; the wheel's Sit moves the figure back onto a seat).
 Avatar.TABLE_SEAT = 50
 local POSES = {
-    [50] = { name = "Table seat", anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_laptop.shopkeeper_02_desk_laptop" },
+    [50] = { name = "Table seat", calm = true, anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_laptop.shopkeeper_02_desk_laptop" },
 }
 local function emoteOf(id) return Avatar.EMOTES[id] or POSES[id] end
+
+-- Sitting at a table. The game's animation for it is a shopkeeper typing at a desk without
+-- a pause, which is too busy for somebody who sits at a card table or a slot machine. So
+-- the figure mostly sits: the animation creeps forth and back over a short stretch of
+-- itself, slowly enough to pass for breathing. Now and then it runs at its own speed for a
+-- few seconds (the hands move), and where it stops is the next stretch to sit in.
+local sitters = {}       -- figure -> { from, dir, typeAt, typingTill }
+local SIT_STRETCH, SIT_RATE = 0.45, 0.1         -- seconds of the animation, and how fast it creeps
+local SIT_EVERY, SIT_FOR = { 20, 45 }, { 2.5, 4.5 }       -- seconds between two spells of moving hands; how long one lasts
+
+local function sitCalm(p)
+    if not p or not valid(p.comp) then return end
+    local from = 0
+    pcall(function() from = p.comp:GetPosition() end)
+    sitters[p] = { from = from, dir = 1, typeAt = os.clock() + math.random(SIT_EVERY[1], SIT_EVERY[2]) }
+    pcall(function() p.comp:SetPlayRate(SIT_RATE) end)
+end
+
+-- The hands move for `seconds` now (a dealer at the end of a round).
+local function sitBusy(p, seconds)
+    local s = sitters[p]
+    if not s or not valid(p.comp) then return end
+    s.typingTill = os.clock() + (seconds or 3)
+    pcall(function() p.comp:SetPlayRate(1) end)
+end
+Avatar.sitCalm, Avatar.sitBusy = sitCalm, sitBusy
+
+Core.onTick(function()
+    local now = os.clock()
+    for p, s in pairs(sitters) do
+        if not valid(p.comp) or not valid(p.body) then
+            sitters[p] = nil
+        else
+            pcall(function()
+                local c = p.comp
+                if s.typingTill then
+                    if now >= s.typingTill then
+                        s.typingTill = nil
+                        s.from, s.dir = c:GetPosition(), 1
+                        s.typeAt = now + math.random(SIT_EVERY[1], SIT_EVERY[2])
+                        c:SetPlayRate(SIT_RATE)
+                    end
+                    return
+                end
+                local at = c:GetPosition()
+                if at < s.from - 1 then s.from = at end         -- (the animation came round)
+                if s.dir == 1 and at >= s.from + SIT_STRETCH then
+                    s.dir = -1
+                    c:SetPlayRate(-SIT_RATE)
+                elseif s.dir == -1 and at <= s.from then
+                    s.dir = 1
+                    c:SetPlayRate(SIT_RATE)
+                end
+                if now >= s.typeAt then
+                    s.typingTill = now + SIT_FOR[1] + math.random() * (SIT_FOR[2] - SIT_FOR[1])
+                    c:SetPlayRate(1)
+                end
+            end)
+        end
+    end
+end)
 Avatar.localEmote = 0      -- the emote our own player is doing (0 = none)
 Avatar.STAND_ANIM = STAND_ANIM
 Avatar.smokeUntil = 0      -- our own player is smoking until this time
@@ -139,6 +200,8 @@ Avatar.tune = {
     strutMaxSpeed = 250,       -- the player's top speed while strutting (the game's walk is about 900; 190 was too slow)
     femaleJogFrom = 260,       -- a woman faster than this jogs (her blueprint has a walk only)
     femaleJogSpeed = 380,      -- units per second the women's jog was made for
+    maleRunFrom = 330,         -- a man faster than this runs (his blueprint has a walk only)
+    maleRunSpeed = 600,        -- units per second the run is played at its own pace
     lightForward = 40, lightUp = 45,
     -- A spot light only shows where it lands. This small light at the phone falls on the
     -- holder's own hands and chest, so a torch that is on can be seen from any side.
@@ -301,6 +364,56 @@ local function toBlueprint(p)
     p.comp:SetAnimationMode(0)
     local class = animClass(p.female and p.skel == "f")
     if class then p.comp:K2_SetAnimInstanceClass(class) end
+end
+
+-- Men running. The citizens have a walk and nothing faster; the policemen have a run, and
+-- their skeleton has the citizens' bones by the same names. So a hidden policeman's body
+-- hangs on the figure and plays the run, and the figure's body and parts take their pose
+-- from it for as long as the man runs.
+local RUN_MESH = "/Game/Skeletal/NPC/Policeman/patrolPolice_NPC.patrolPolice_NPC"
+local RUN_ANIM = "/Game/Policeman_RunTemp.Policeman_RunTemp"
+local function setRun(p, on)
+    if on then
+        if p.runFailed then return end
+        local ok, e = pcall(function()
+            if not (p.runner and valid(p.runner)) then
+                local m = asset(RUN_MESH)
+                if not m then error("the policeman's body is not available") end
+                local l = p.body:K2_GetActorLocation()
+                local a = p.body:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.SkeletalMeshActor"), { X = l.X, Y = l.Y, Z = l.Z }, { Pitch = 0, Yaw = 0, Roll = 0 })
+                p.actors[#p.actors + 1] = a
+                a:SetActorEnableCollision(false)
+                local c = a.SkeletalMeshComponent
+                c:SetSkeletalMesh(m, true)
+                c:SetVisibility(false, false)
+                pcall(function() c.VisibilityBasedAnimTickOption = 0 end)       -- always tick pose and bones
+                a:K2_AttachToActor(p.body, FName("None"), 2, 2, 2, false)
+                p.runner, p.runComp = a, c
+            end
+            local anim = asset(RUN_ANIM)
+            if not anim then error("the run is not available") end
+            p.runComp:PlayAnimation(anim, true)
+            p.comp:SetMasterPoseComponent(p.runComp, true)
+            for _, part in ipairs(p.followers or {}) do part:SetMasterPoseComponent(p.runComp, true) end
+        end)
+        if not ok then
+            p.runFailed = true
+            log("A figure cannot run: %s", tostring(e))
+            return
+        end
+        p.running = true
+    elseif p.running then
+        p.running = false
+        local ok, e = pcall(function()
+            p.comp:SetMasterPoseComponent(nil, true)
+            for _, part in ipairs(p.followers or {}) do part:SetMasterPoseComponent(p.comp, true) end
+            if valid(p.runComp) then p.runComp:Stop() end
+        end)
+        if not ok then
+            p.runFailed = true
+            log("A figure cannot stop running: %s", tostring(e))
+        end
+    end
 end
 
 local function applySkin(p, head)
@@ -919,6 +1032,8 @@ local function holdThings(p)
             toBlueprint(p)
         end
         p.pose = pose
+        -- (a seat at a table: mostly sitting still, see sitCalm)
+        if anim and emote and emote.calm and pose and pose:sub(1, 5) == "emote" then sitCalm(p) else sitters[p] = nil end
         if holdsPhone then seatPhone(p, pose) end
         -- An emote may stand the figure elsewhere than the player (see Avatar.EMOTES). The
         -- own figure only while it is held where it stands (otherwise it hangs on the player).
@@ -1068,6 +1183,16 @@ local function move(p, dt, camera)
             p.comp:SetPlayRate(math.max(0.6, math.min(1.8, (p.speed or 0) / Avatar.tune.femaleJogSpeed)))
         end
     end
+    if not p.female then
+        local speed = Avatar.tune.testSpeed or p.speed or 0
+        -- (not while the hands or the body do something else: phone, call, strut, an emote, crouching)
+        local run = not p.phoneAnim and not p.crouched and (p.emote or 0) == 0
+            and speed > Avatar.tune.maleRunFrom - (p.running and 40 or 0)
+        if run ~= (p.running == true) then setRun(p, run) end
+        if p.running then
+            pcall(function() p.runComp:SetPlayRate(math.max(0.7, math.min(1.6, speed / Avatar.tune.maleRunSpeed))) end)
+        end
+    end
     if not p.phoneAnim and not p.jogging and (p.walk ~= p.speed or now) then
         p.walk = p.speed
         pcall(function()
@@ -1182,7 +1307,11 @@ end
 
 local function describe(actor, own)
     local loc = actor:K2_GetActorLocation()
-    if actor == World.player() then loc.Z = loc.Z + (Avatar.sendZ or 0) end
+    if actor == World.player() then
+        loc.Z = loc.Z + (Avatar.sendZ or 0)
+        -- (seated at a slot machine the view is held behind the stool the figure sits on)
+        if Avatar.sendXY then loc.X, loc.Y = Avatar.sendXY.x, Avatar.sendXY.y end
+    end
     local rot = actor:K2_GetActorRotation()
     local yaw = rot.Yaw
     if own and Avatar.sendYaw then yaw = Avatar.sendYaw end

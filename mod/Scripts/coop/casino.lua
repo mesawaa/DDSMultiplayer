@@ -14,6 +14,7 @@ local Avatar = require("coop.avatar")
 local Hud = require("coop.hud")
 local Look = require("coop.look")
 local Screen = require("coop.screen")
+local Third = require("coop.third")
 
 local log, valid = Core.log, Core.valid
 
@@ -37,21 +38,22 @@ local SEATS = {
 }
 local SEAT_NAMES = { "middle seat", "left seat", "right seat" }      -- seen from the room
 -- The lounge around the table is a level of the game's own, loaded while a player with
--- collision is in the club's basement and thrown away when none is. Two of its tables and
--- a plate are where the card table stands; they are known by name.
+-- collision is in the club's basement and thrown away when none is. The three tables of
+-- its booths stand in a row where the card table is and next to it, with a plate on one;
+-- all of them go. So does the third pair of sofas (SM_Sofa_3 along the wall, SM_Sofa_4 on
+-- the room's side): the dance floor is where they stood (coop/dance.lua). The two pairs
+-- of sofas at the card table stay. They are known by name.
 local LOUNGE = "/Game/Levels/stream_ballenaClub.stream_ballenaClub:PersistentLevel."
-local IN_THE_WAY = { "SM_Table_4", "SM_Table_5", "SM_Plate_4" }
--- A bottle of the lounge and three glasses of the city level stood on those tables; they go
--- onto the felt (read from the two levels' files: nothing else of either level is inside
--- the card table's footprint).
+local IN_THE_WAY = { "SM_Table_4", "SM_Table_5", "SM_Table_6", "SM_Plate_4", "SM_Sofa_3", "SM_Sofa_4" }
+-- A bottle of the lounge and three glasses of the city level stood on those tables; those
+-- over the felt go onto it, the others are hidden (read from the two levels' files:
+-- nothing else of either level stood on the tables).
 local ON_THE_FELT = { LOUNGE .. "SM_Bottle_4", "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_319",
     "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_322", "/Game/Levels/theCity.theCity:PersistentLevel.SM_Glass_325" }
--- Its furniture next to the seats, as boxes around the table's centre (measured in the
--- running game): the sofas on the room's side, those along the wall, the third table.
+-- Its sofas on the room's side of the table, right behind the chairs, as a box around the
+-- table's centre (measured in the running game).
 local BOOTHS = {
-    { x0 = -225, x1 = -128, y0 = -135, y1 = 375 },
-    { x0 = 63, x1 = 160, y0 = -135, y1 = 375 },
-    { x0 = -85, x1 = 25, y0 = 202, y1 = 358 },
+    { x0 = -225, x1 = -128, y0 = -135, y1 = 205 },
 }
 local EYE = FLOOR + 122       -- where a seated player's view is held
 local SIT = FLOOR + 90        -- where the others see them (on the chair)
@@ -76,6 +78,19 @@ local function asset(path)
     pcall(function() o = LoadAsset(path) end)
     if valid(o) then return o end
     return nil
+end
+
+-- The dealer's place on the sofa behind the table: this far from the table's middle, and
+-- this much above where the sitting animation has its seat (the shopkeepers' sitting at a
+-- desk: upright, the hands on the table's edge by the chips).
+local DEALER = { x = 110, up = 0, anim = "/Game/Animations/NoweMocap/NaCitizen/Dopracowane/shopkeeper_02_desk_laptop.shopkeeper_02_desk_laptop" }
+Casino.DEALER = DEALER
+
+function Casino.seatDealer()
+    if not room or not room.dealer then return end
+    Avatar.poseStandIn(room.dealer, DEALER.anim)
+    Avatar.moveStandIn(room.dealer, TX + DEALER.x, TY, FLOOR + 90 + DEALER.up, 180)
+    Avatar.sitCalm(room.dealer)         -- (mostly sitting still; his hands move when a round ends)
 end
 
 local function clearRoom()
@@ -178,13 +193,15 @@ local function buildRoom()
     for i = 0, 4 do stack(TX + 48, TY - 10.4 + i * 5.2, 14, colors[i + 1]) end
     shape("Cube", TX + 40, TY + 34, TOP + 1.2, 0.063, 0.088, 0.016, 80, MAT.blue)        -- the deck
     for i = 1, 3 do shape("Cube", TX - 10 + rnd() * 20, TY + 92 + i * 9, TOP + 0.45, 0.063, 0.088, 0.0012, 60 + rnd() * 60, MAT.white) end
-    -- chairs
+    -- chairs: one behind every seat and one at the table's far end, all turned to the
+    -- table (the model's back is on its -Y side: a chair that faces `yaw` is turned yaw - 90).
+    -- The near end has none: it would stand in the lounge's column.
     local chair = "/Game/FreeFurniturePack/Meshes/SM_Classic_chair.SM_Classic_chair"
-    mesh(chair, TX - 104, TY, FLOOR, 0)
-    mesh(chair, TX - 84, TY - 124, FLOOR, 28)
-    mesh(chair, TX - 84, TY + 124, FLOOR, -28)
-    mesh(chair, TX + 10, TY + 168, FLOOR, -90)
-    mesh(chair, TX + 10, TY - 168, FLOOR, 90)
+    local function chairAt(x, y, facing) mesh(chair, x, y, FLOOR, facing - 90) end
+    chairAt(TX - 104, TY, 0)
+    chairAt(TX - 84, TY - 124, 28)
+    chairAt(TX - 84, TY + 124, -28)
+    chairAt(TX + 10, TY + 168, -90)
     -- lamps over the table
     bar("Lights/SM_CeilingLight_4", TX, TY - 60, 78, 0)
     bar("Lights/SM_CeilingLight_4", TX, TY + 60, 78, 0)
@@ -194,8 +211,6 @@ local function buildRoom()
     bar("BarProps/SM_Barrel", TX + 120, TY - 260, FLOOR, 0)
     bar("BarProps/SM_Bottle_1", TX + 120, TY - 262, FLOOR + 85, 0)
     bar("BarProps/SM_Glass_2", TX + 108, TY - 250, FLOOR + 85, 0)
-    bar("BarProps/SM_Barrel", TX + 150, TY + 300, FLOOR, 0)
-    bar("BarProps/SM_Bottle_5", TX + 150, TY + 300, FLOOR + 85, 0)
     bar("BarProps/SM_Bottle_4", TX - 30, TY + 100, TOP + 0.4, 0)
     bar("BarProps/SM_Glass_1", TX - 22, TY + 88, TOP + 0.4, 0)
     bar("BarProps/SM_Painting_1", TX + 160, TY - 150, FLOOR + 150, 90)
@@ -206,6 +221,8 @@ local function buildRoom()
     -- the dealer
     room.dealer = Avatar.buildStandIn({ body = "SK_ma_waiter_01", head = "SK_ma_head_02", hair = "Hats_Hair/SK_ma_hair_03", arms = true },
         TX + 112, TY, FLOOR + 90, 180, nil, "idle")
+    -- he sits on the lounge's sofa along the wall, which is right behind the table
+    pcall(Casino.seatDealer)
     log("Casino: the card room is set up (%d pieces)", #room.actors)
 end
 
@@ -216,8 +233,8 @@ end
 -- again. Everything is looked up by name: this used to go through every StaticMeshActor
 -- of the world, about 300 ms each time, and did so every 3 s for as long as a player was
 -- within 25 m of the table (the list of what was hidden was emptied right after it had
--- been filled, so the 60 s pause never began), which players felt as hitches "only at
--- night", the club's hours (reported with 0.18.0).
+-- been filled, so the 60 s pause never began), which players felt as hitches only at
+-- night, the club's hours.
 -- A lookup by name costs 25-30 ms here (UE4SS walks the whole object list), so what was
 -- found is kept until it is gone, and the lounge's own pieces are only looked for while
 -- its level is loaded (room.loungeLoaded, kept by the level watcher below).
@@ -247,7 +264,17 @@ local function putAway()
         if a then
             pcall(function()
                 local l = a:K2_GetActorLocation()
-                if math.abs(l.X - TX) <= 135 and math.abs(l.Y - TY) <= 215 and math.abs(l.Z - (TOP + 0.4)) > 1 then
+                local dx, dy = l.X - TX, l.Y - TY
+                if (dx / 62) ^ 2 + (dy / 120) ^ 2 > 1 then
+                    -- not over the felt (the tables were longer than it is): it would
+                    -- hang in the air or stand on the rim, so it goes with the tables
+                    if a.bHidden ~= true then a:SetActorHiddenInGame(true) end
+                    local addr, known = a:GetAddress(), false
+                    for _, h in ipairs(room.hidden) do
+                        if valid(h) and h:GetAddress() == addr then known = true break end
+                    end
+                    if not known then room.hidden[#room.hidden + 1] = a end
+                elseif math.abs(l.Z - (TOP + 0.4)) > 1 then
                     a:SetMobility(2)
                     a:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = TOP + 0.4 }, false, {}, true)
                 end
@@ -256,6 +283,53 @@ local function putAway()
     end
 end
 
+---------------------------------------------------------------- a seated player and the world
+
+-- A seated player is held in place among chairs and a table: nothing may push them, and
+-- nobody may be stopped by them. Their collision is not switched off for that (the game
+-- throws the lounge's level away as soon as no player touches the box around it, and the
+-- furniture would be gone for as long as they sit): whatever the player's capsule stops, it
+-- lets through instead, and gets back when the player stands up.
+local ghost = nil       -- { owner, saved = { channel -> response } }
+local BLOCK, OVERLAP = 2, 1
+
+local function setGhost(player, on)
+    local address = player:GetAddress()
+    if on then
+        if ghost and ghost.owner == address then return end
+        local ok, e = pcall(function()
+            local capsule = player.CapsuleComponent
+            local saved = {}
+            for channel = 0, 31 do
+                local r = capsule:GetCollisionResponseToChannel(channel)
+                if r == BLOCK then saved[channel] = r end
+            end
+            if next(saved) == nil then error("the capsule stops nothing") end
+            for channel in pairs(saved) do capsule:SetCollisionResponseToChannel(channel, OVERLAP) end
+            ghost = { owner = address, saved = saved }
+        end)
+        if not ok then
+            log("Casino: a seated player's collision: %s", tostring(e))
+            ghost = { owner = address, off = true }
+            pcall(function() player:SetActorEnableCollision(false) end)
+        end
+    else
+        local was = ghost
+        ghost = nil
+        if not was or was.owner ~= address then return end
+        pcall(function()
+            if was.off then
+                player:SetActorEnableCollision(true)
+            else
+                local capsule = player.CapsuleComponent
+                for channel, r in pairs(was.saved) do capsule:SetCollisionResponseToChannel(channel, r) end
+            end
+        end)
+    end
+end
+Casino.ghost = setGhost
+Casino.ghostState = function() return ghost end
+
 ---------------------------------------------------------------- the lounge's level
 
 -- Every time the lounge's level is loaded its furniture is made anew, so what was hidden
@@ -263,7 +337,30 @@ end
 -- soon as the level is loaded (before it is shown), and the rest is looked through the
 -- moment it is shown.
 local lounge = nil      -- { owner, level, loaded, visible }
-local hold = nil        -- after standing up: { owner, till }
+local hold = nil        -- after standing up: { owner, till, sofas }
+
+-- The sofas along the room's side of the table, right behind the chairs: a player who gets
+-- up stands where one of them is. That one is away (unseen, nothing stops at it) until the
+-- player has stepped out of it; the rest of the lounge stays as it is.
+local SOFAS = { { name = "SM_Sofa_6", y = -8425 }, { name = "SM_Sofa_5", y = -8255 } }
+
+local function sofasAt(y)
+    local out = {}
+    for _, s in ipairs(SOFAS) do
+        if math.abs(y - s.y) < 115 then out[#out + 1] = s.name end
+    end
+    return out
+end
+
+local function sofasAway(names, away)
+    for _, name in ipairs(names or {}) do
+        local a = lookup(LOUNGE .. name, true)
+        if a and (a.bHidden == true) ~= away then
+            a:SetActorHiddenInGame(away)
+            a:SetActorEnableCollision(not away)
+        end
+    end
+end
 
 local function loungeLevel(player)
     local address = player:GetAddress()
@@ -323,9 +420,9 @@ Core.onTick(function()
     if not level then return end
     local ok, e = pcall(function()
         if hold then
-            -- A player who got up stands where a sofa belongs. The lounge is kept from
-            -- showing for a while, and for as long as they are still inside its furniture;
-            -- after half a minute of that they are set beside the sofa.
+            -- A player who got up stands where a sofa belongs. That sofa stays away for a
+            -- while, and for as long as they are still inside it; after half a minute of
+            -- that they are set beside it.
             local now = os.clock()
             local done = hold.owner ~= player:GetAddress() or Casino.seated
             if not done and now >= hold.till then
@@ -338,10 +435,11 @@ Core.onTick(function()
                 end
             end
             if done then
+                local names = hold.sofas
                 hold = nil
-                if level.bShouldBeLoaded == true then level:SetShouldBeVisible(true) end
-            elseif level.bShouldBeVisible == true then
-                level:SetShouldBeVisible(false)
+                sofasAway(names, false)
+            else
+                sofasAway(hold.sofas, true)     -- (again: a level loaded anew has them back)
             end
         end
         local loaded, visible = level:IsLevelLoaded() == true, level:IsLevelVisible() == true
@@ -402,6 +500,8 @@ end
 local function clubShouldBeOpen()
     local player = World.player()
     if not player or not active() then return false end
+    -- (La Ballena has shut the club for the night: coop/poker.lua)
+    if Casino.closed and Casino.closed() then return false end
     if Core.config.CardRoomAlwaysOpen == true then return true end
     local hour = 12
     pcall(function() hour = Core.find("dayTimeControler_C").curHour end)
@@ -411,10 +511,17 @@ end
 
 ---------------------------------------------------------------- the club's music
 
--- The club has one speaker (ballenaClubManager.music) on which the game loops a single
--- track. In a shared world it plays the whole ambient soundtrack instead, one track after
--- another in random order. The host picks, so that everybody at the table hears the same
--- song; each game plays it on its own speaker, and only while its player is in the club.
+-- The club has one speaker (ballenaClubManager.music). The game plays its own set for the
+-- club on it, eleven tracks of one kind (a music area of the level, musicAreaPlaylist, with
+-- this speaker as its only one: every 17 s without music it starts another of them). The mod
+-- plays the rest of the ambient soundtrack there instead, one track after another in random
+-- order, and keeps the game's set off the speaker (otherwise the game puts one of its own
+-- over whatever plays, and the club sounds the same all night). The host picks, so that
+-- everybody at the table hears the same song; each game plays it on its own speaker, and
+-- only while its player is in the club.
+-- The first CLUB_SET entries are the club's own set: they stay in the list (a track goes
+-- to the other games by its number) and are never picked.
+local CLUB_SET = 11
 local MUSIC = "/Game/Audio/Music/MuzykaOtoczenia/"
 local TRACKS = {
     "BallenaClub/artlistBallenaBlues-bruiser", "BallenaClub/artlistBallenaBones", "BallenaClub/artlistBallenaCrankshaft",
@@ -464,13 +571,61 @@ local function track(i)
     return nil
 end
 
+-- The game's music area that plays on the club's speaker, kept from starting anything:
+-- it believes its music is playing, and its two timers (look for music to start, end the
+-- track that plays) are off. Its loudness is the one the mod plays at.
+local AREA = "/Game/Audio/Music/MuzykaOtoczenia/musicAreaPlaylist.musicAreaPlaylist_C"
+local area = nil        -- { owner, actor, volume }
+
+local function quietArea()
+    local player = World.player()
+    local owner = player:GetAddress()
+    if not area or area.owner ~= owner then
+        area = { owner = owner, lookAt = 0 }
+    end
+    if not area.actor and os.clock() >= area.lookAt then
+        area.lookAt = os.clock() + 10
+        local manager = Core.find("ballenaClubManager_C")
+        local speaker = manager and valid(manager.music) and manager.music:GetAddress() or nil
+        for _, a in ipairs(speaker and Core.actors(AREA) or {}) do
+            pcall(function()
+                local points = a.ambientSoundPoints
+                for i = 1, points:GetArrayNum() do
+                    if valid(points[i]) and points[i]:GetAddress() == speaker then area.actor = a end
+                end
+            end)
+        end
+        if area.actor then
+            pcall(function()
+                local low, high = area.actor.minMusicVolume, area.actor.maxMusicVolume
+                if type(low) == "number" and type(high) == "number" and high > 0 then area.volume = (low + high) / 2 end
+            end)
+            log("Casino: the game's own music for the club is kept off its speaker")
+        end
+    end
+    local a = area.actor
+    if not a or not Core.alive(a) then
+        area.actor = nil
+        return
+    end
+    if a.musicIsPlaying ~= true or not area.cleared then
+        area.cleared = true
+        a.musicIsPlaying = true
+        local system = Core.system()
+        system:K2_ClearTimer(a, "ActivateMusicInArea")
+        system:K2_ClearTimer(a, "endMusic")
+    end
+end
+
 -- Starts the current track on our speaker, `offset` seconds in.
 local function playTrack(offset)
     local speaker, wave = clubSpeaker(), track(dj.index)
     if not speaker or not wave then return end
     speaker:SetSound(wave)
+    pcall(function() speaker:SetVolumeMultiplier(area and area.volume or 0.3) end)
+    pcall(function() speaker:SetActive(true, false) end)
     speaker:Play(math.max(0, offset or 0))
-    dj.playing = dj.index
+    dj.playing, dj.playedAt = dj.index, os.clock()
 end
 
 local function tellTrack(target)
@@ -485,9 +640,10 @@ end
 Core.every(1, function()
     if not live() or not active() or not World.player() then return end
     local now = os.clock()
+    pcall(quietArea)
     if World.role ~= "guest" and (not dj.index or now >= dj.startedAt + dj.length) then
-        local pick = math.random(#TRACKS)
-        if pick == dj.index then pick = pick % #TRACKS + 1 end
+        local pick = CLUB_SET + math.random(#TRACKS - CLUB_SET)
+        if pick == dj.index then pick = CLUB_SET + (pick - CLUB_SET) % (#TRACKS - CLUB_SET) + 1 end
         local wave = track(pick)
         local length = 180
         pcall(function() if wave and wave.Duration > 10 then length = wave.Duration end end)
@@ -502,13 +658,36 @@ Core.every(1, function()
     elseif dj.playing ~= dj.index then
         local ok, e = pcall(playTrack, now - dj.startedAt)
         if not ok then log("Casino: the club's music: %s", tostring(e)) end
+    elseif now - (dj.playedAt or 0) > 8 then
+        -- (the game silences every music area now and then, a police chase for one: ours
+        -- is started again where the track is by now)
+        local silent = false
+        pcall(function() silent = clubSpeaker():IsPlaying() ~= true end)
+        if silent then pcall(playTrack, now - dj.startedAt) end
     end
 end)
+Casino.musicArea = function() return area end
+
+-- A song a player paid for at the bar (coop/edwin.lua): it plays now, for everybody. In
+-- the game that picks the club's music.
+function Casino.pickTrack(i)
+    i = math.floor(tonumber(i) or 0)
+    if World.role == "guest" or i <= CLUB_SET or not TRACKS[i] then return false end
+    local wave = track(i)
+    local length = 180
+    pcall(function() if wave and wave.Duration > 10 then length = wave.Duration end end)
+    dj.index, dj.startedAt, dj.length, dj.playing = i, os.clock(), length - 1, nil
+    tellTrack()
+    return true
+end
+Casino.TRACKS, Casino.CLUB_SET = TRACKS, CLUB_SET
 
 Net.on("dj", function(sender, data)
     if not live() or World.role ~= "guest" or sender ~= (World.host or Net.S.owner) then return end
     local i, e = tonumber(data.i), tonumber(data.e) or 0
     if not i or not TRACKS[i] then return end
+    -- (again the track we already play, and at the same place in it: nothing to do)
+    if math.floor(i) == dj.index and math.abs((os.clock() - e) - dj.startedAt) < 3 then return end
     dj.index, dj.startedAt, dj.playing = math.floor(i), os.clock() - e, nil
 end)
 
@@ -564,12 +743,7 @@ local function pay(amount)
     pcall(function() World.player():addMoney(amount, true, {}) end)
     local missing = amount - (cash() - before)
     if missing <= 0 then return "" end
-    local banked = false
-    pcall(function()
-        local computer = Core.find("mainComputer_C")
-        computer.playerBankMoney = computer.playerBankMoney + missing
-        banked = true
-    end)
+    local banked = Hud.bankTransfer(true, missing, "Winnings", "NIGHT CLUB")
     if banked then return string.format("$%d went to your bank account: your pockets are full", missing) end
     log("Casino: could not pay out $%d", missing)
     return ""
@@ -1170,6 +1344,11 @@ onRound = function(data)
     end
     round.left = tonumber(data.c)
     pcall(layDealer)
+    -- the dealer's turn at the end of a round: his hands are busy for a moment
+    if round.phase == "dealer" and room and room.dealer and room.dealerBusy ~= round.n then
+        room.dealerBusy = round.n
+        pcall(Avatar.sitBusy, room.dealer, 3.5)
+    end
     if not g then return end
     if round.phase == "play" and round.into[me()] and g.state == "ready" then
         dealMine()
@@ -1359,6 +1538,44 @@ local function freeSeat()
     return near, nearIndex
 end
 
+-- The two views of a seated player: the wheel turned towards the player moves the view out
+-- behind the chair, turned away it moves in to the seat.
+local viewChoice = nil       -- the view the player had last (nil: none chosen yet)
+
+local function setView(behind)
+    if not Casino.seated or not seat or not scr or seat.behind == behind then return false end
+    local player = World.player()
+    if not player or seat.owner ~= player:GetAddress() then return false end
+    seat.behind, seat.z = behind, behind and SIT or EYE
+    viewChoice = behind
+    scr.keepView = behind
+    Avatar.sendZ = SIT - seat.z
+    Third.force = behind and "seat" or nil
+    pcall(function() player:K2_SetActorLocation({ X = seat.place.x, Y = seat.place.y, Z = seat.z }, false, {}, true) end)
+    return true
+end
+Casino.setView = setView
+
+-- (the wheel is only known for the one frame it turns in: asked every frame, not every tick)
+if LoopInGameThreadWithDelay then
+    local UP, DOWN = nil, nil
+    LoopInGameThreadWithDelay(1, function()
+        if not live() then return true end
+        if not Casino.seated or not seat then return false end
+        pcall(function()
+            local pc = World.player():GetController()
+            UP = UP or { KeyName = FName("MouseScrollUp") }
+            DOWN = DOWN or { KeyName = FName("MouseScrollDown") }
+            if pc:WasInputKeyJustPressed(UP) == true then
+                setView(false)
+            elseif pc:WasInputKeyJustPressed(DOWN) == true then
+                setView(true)
+            end
+        end)
+        return false
+    end)
+end
+
 function Casino.enter()
     if Casino.seated then return true end
     local player = World.player()
@@ -1373,7 +1590,14 @@ function Casino.enter()
         Hud.toast("Every seat at the table is taken", 3)
         return false
     end
-    seat = { place = place, index = index, owner = player:GetAddress() }
+    -- The view: from behind and above the own chair, the own figure on it (the players on
+    -- the other seats are to the left and right of the picture), or from the seat itself,
+    -- where only the dealer and the felt are in view. The mouse wheel goes from one to the
+    -- other (see setView); a player sits down with the view they had last, the first time
+    -- with the one CardRoomBehindView names.
+    local behind = viewChoice
+    if behind == nil then behind = Core.config.CardRoomBehindView ~= false end
+    seat = { place = place, index = index, owner = player:GetAddress(), behind = behind, z = behind and SIT or EYE }
     pcall(function() seat.hud = player.HUD.Visibility end)
     scr = Screen.open()
     if not scr then
@@ -1381,15 +1605,17 @@ function Casino.enter()
         seat = nil
         return false
     end
+    scr.keepView = behind
     pcall(function()
-        player:SetActorEnableCollision(false)
+        setGhost(player, true)
         player.CharacterMovement:SetMovementMode(5, 0)       -- flying: nothing pulls the seated player down
         player.CharacterMovement.Velocity = { X = 0, Y = 0, Z = 0 }
-        player:K2_SetActorLocation({ X = place.x, Y = place.y, Z = EYE }, false, {}, true)
+        player:K2_SetActorLocation({ X = place.x, Y = place.y, Z = seat.z }, false, {}, true)
         player:GetController():SetControlRotation({ Pitch = PITCH, Yaw = place.yaw, Roll = 0 })
     end)
     pcall(function() player.HUD:SetVisibility(1) end)
-    Avatar.noEmoteView, Avatar.sendZ = true, SIT - EYE
+    Avatar.noEmoteView, Avatar.sendZ = true, SIT - seat.z
+    Third.force = behind and "seat" or nil
     pcall(Avatar.setEmote, Avatar.TABLE_SEAT)
     Casino.seated = true
     scr.onClose = function() if Casino.seated then Casino.leave() end end
@@ -1414,26 +1640,26 @@ function Casino.leave()
     end
     local player = World.player()
     if player and seat and seat.owner == player:GetAddress() then
+        -- standing behind the chair: where the lounge has a sofa, which is away for a
+        -- moment (see the lounge's level above)
+        local r = math.rad(seat.place.yaw)
+        local x, y = seat.place.x - math.cos(r) * 75, seat.place.y - math.sin(r) * 75
+        local seconds = tonumber(Core.config.CardRoomStandUpSeconds) or 3
+        if seconds > 0 then
+            if hold then pcall(sofasAway, hold.sofas, false) end
+            hold = { owner = player:GetAddress(), till = os.clock() + seconds, sofas = sofasAt(y) }
+            pcall(sofasAway, hold.sofas, true)
+        end
         pcall(function()
-            -- standing behind the chair
-            local r = math.rad(seat.place.yaw)
-            player:K2_SetActorLocation({ X = seat.place.x - math.cos(r) * 75, Y = seat.place.y - math.sin(r) * 75, Z = FLOOR + 100 }, false, {}, true)
-            player:SetActorEnableCollision(true)
+            player:K2_SetActorLocation({ X = x, Y = y, Z = FLOOR + 100 }, false, {}, true)
+            setGhost(player, false)
             player.CharacterMovement:SetMovementMode(3, 0)
             player:GetController():ResetIgnoreLookInput()
         end)
         pcall(function() player.HUD:SetVisibility(seat.hud or 4) end)
-        -- the lounge's furniture stays away for a moment (see the lounge's level above)
-        local seconds = tonumber(Core.config.CardRoomStandUpSeconds) or 3
-        if seconds > 0 then
-            hold = { owner = player:GetAddress(), till = os.clock() + seconds }
-            pcall(function()
-                local level = loungeLevel(player)
-                if level and level.bShouldBeVisible == true then level:SetShouldBeVisible(false) end
-            end)
-        end
     end
     Avatar.noEmoteView, Avatar.sendZ = nil, nil
+    Third.force = nil
     pcall(Avatar.setEmote, 0)
     seat = nil
     pcall(layDealer)
@@ -1456,11 +1682,12 @@ Core.onTick(function()
     if not player or not seat or seat.owner ~= player:GetAddress() then
         Casino.seated, g, scr, seat = false, nil, nil, nil
         Avatar.noEmoteView, Avatar.sendZ = nil, nil
+        Third.force, ghost = nil, nil
         return
     end
     pcall(function()
         local place = seat.place
-        player:K2_SetActorLocation({ X = place.x, Y = place.y, Z = EYE }, false, {}, true)
+        player:K2_SetActorLocation({ X = place.x, Y = place.y, Z = seat.z }, false, {}, true)
         local pc = player:GetController()
         LMB = LMB or { KeyName = FName("LeftMouseButton") }
         local held = false
@@ -1478,7 +1705,7 @@ Core.onTick(function()
 end)
 
 -- The wardrobe key lets a player at the club's door go down to the table.
-Look.takeover = {
+Casino.takeover = {
     isOpen = function() return live() and Casino.seated end,
     near = function() return live() and nearTable() end,
     prompt = function()
@@ -1490,6 +1717,7 @@ Look.takeover = {
     move = function() end,
     choose = function() end,
 }
+Look.takeover = Casino.takeover
 
 -- In single player no "stop" comes when the world goes (back to the main menu, another
 -- save loaded): a seat in a world that is gone is only forgotten. Its actors went with
@@ -1504,6 +1732,7 @@ local function forgetGoneWorld()
     end
     seat = nil
     Avatar.noEmoteView, Avatar.sendZ = nil, nil
+    Third.force, ghost = nil, nil
     for key in pairs(felt) do felt[key] = nil end
     for id in pairs(seatOf) do seatOf[id] = nil end
 end
@@ -1558,6 +1787,13 @@ World.listen("stop", function()
 end)
 
 -- For reloading the module while developing.
+-- A save loaded from inside the game: the level stays, so the room is taken away (and
+-- built again for the new player).
+World.listen("loading", function()
+    local player = World.player()
+    if live() and room and player and room.owner == player:GetAddress() then clearRoom() end
+end)
+
 function Casino.shutdown()
     if Casino.seated then pcall(Casino.leave) end
     for index in pairs(felt) do clearFelt(index) end
@@ -1568,4 +1804,8 @@ end
 Casino.DOOR, Casino.SEAT, Casino.SEATS, Casino.TABLE = DOOR, SEAT, SEATS, { x = TX, y = TY, floor = FLOOR }
 Casino.enterNearest, Casino.nearTable, Casino.clubShouldBeOpen = Casino.enter, nearTable, clubShouldBeOpen
 Casino.freeSeat = freeSeat
+-- for the slot machines along the wall (coop/slots.lua)
+Casino.active, Casino.nearClub, Casino.cash, Casino.take, Casino.pay, Casino.tell = active, nearClub, cash, take, pay, tell
+-- for La Ballena's poker table (coop/poker.lua)
+Casino.insideClub = insideClub
 return Casino
