@@ -20,12 +20,14 @@ local Thumbs = { made = 0 }
 
 local RGBA8, FINAL_COLOUR, SHOW_ONLY_LIST = 2, 2, 2
 -- body: the whole figure. face: the face and nothing else. hair: hair or hat, seen a
--- little from above.
+-- little from above. wrist: the left wrist (a watch); `bone`: the camera stands in front of
+-- that bone of the figure and not at a fixed height.
 local SHOTS = {
     body = { dist = 236, up = 0, fov = 30, w = 192, h = 288 },
     head = { dist = 95, up = 72, fov = 30, w = 192, h = 192 },
     face = { dist = 50, up = 76, fov = 28, w = 192, h = 192 },
     hair = { dist = 58, up = 105, fov = 30, pitch = -18, w = 192, h = 192 },
+    wrist = { dist = 40, up = 1, fov = 28, w = 192, h = 192, bone = "hand_l" },
 }
 Thumbs.SHOTS = SHOTS
 -- Women are shorter: a face, head or hair picture is taken this much lower.
@@ -198,7 +200,17 @@ Core.onTick(function()
         end)
         job.stage, job.at = "posed", now + 0.15
     elseif job.stage == "posed" and now >= job.at then
-        for _, it in ipairs(job.items) do pcall(function() it.entry.comp:CaptureScene() end) end
+        for _, it in ipairs(job.items) do
+            pcall(function()
+                local e = it.entry
+                if e.shot.bone then
+                    -- (now that the figure stands in its pose)
+                    local b = it.fig.comp:GetSocketLocation(FName(e.shot.bone))
+                    e.cam:K2_SetActorLocationAndRotation({ X = b.X - e.shot.dist, Y = b.Y, Z = b.Z + e.shot.up }, { Pitch = e.shot.pitch or 0, Yaw = 0, Roll = 0 }, false, {}, true)
+                end
+                e.comp:CaptureScene()
+            end)
+        end
         job.stage, job.at = "shot", now + 0.06
     elseif job.stage == "shot" and now >= job.at then
         for _, it in ipairs(job.items) do

@@ -328,6 +328,8 @@ local GAME_WINDOWS = { "inventoryOpen", "phoneUp", "computerOpen", "mapOpen", "s
 local LMB, RMB = nil, nil
 
 local function keepMouse(s, anyDown)
+    -- (a chat line being typed has the keyboard; the chat gives the mouse back when it closes)
+    if Core.typing then return end
     local player = World.player()
     if not player or World.gone then return end
     local pc = player:GetController()

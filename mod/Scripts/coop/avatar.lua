@@ -42,6 +42,19 @@ local JOINT_CLASS = "/Game/Skeletal/NPC/EddieReady/Props/ballenaCigarBP.ballenaC
 local WISP_FX = SMOKE_FX
 local FLAG_PHONE, FLAG_LIGHT, FLAG_CALL, FLAG_SMOKE = 1, 2, 4, 8
 local FLAG_STRUT = 128      -- (16..64 are the bag)
+-- The player crouches: the game halves the capsule (its middle is 45 above the feet
+-- instead of 90), so the figure stands that much higher than a standing one, in its
+-- crouching pose. (Builds before v0.19 do not send it: their figures sink in.)
+local FLAG_CROUCH = 256
+Avatar.FLAG_CROUCH = FLAG_CROUCH
+local CROUCH_FEET = -45
+local CROUCH_POSE = "/Game/Animations/Sebiks_MOB1_Crouch_Idle_V2_IPC.Sebiks_MOB1_Crouch_Idle_V2_IPC"
+-- Where a figure's feet are below the place sent for it (the capsule's middle).
+local function feetOffset(p)
+    if not p.own and (p.flags or 0) & FLAG_CROUCH ~= 0 then return CROUCH_FEET end
+    return FEET_OFFSET
+end
+Avatar.feetOffset = feetOffset
 -- The strut: a walk of the game's citizens (listening to music), played instead of the
 -- normal walk while the player has it switched on (coop/emote.lua: Caps Lock or the wheel).
 local STRUT_ANIM = "/Game/Animations/CitizenMale_Walk_08_Listen_Music_Loop_IP.CitizenMale_Walk_08_Listen_Music_Loop_IP"
@@ -372,6 +385,7 @@ local function applyColour(comp, colour)
 end
 
 -- Builds one puppet. `name` adds a floating label (players only).
+local function setWatch(p, code) return Avatar.setWatch(p, code) end
 local function build(look, pos, name)
     local player = World.player()
     if not player then return nil end
@@ -381,6 +395,7 @@ local function build(look, pos, name)
         local meshName, colour = splitBody(look.body)
         local female = isFemale(meshName)
         p.female, p.skel, p.followers = female, female and "f" or nil, {}
+        p.bodyMesh = meshName
         local bodyMesh = mesh(female and FEMALE_BASE or meshName)
         if not bodyMesh then error("body mesh not available") end
         local body = spawn(world, "/Script/Engine.SkeletalMeshActor", pos)
@@ -438,6 +453,7 @@ local function build(look, pos, name)
             end
         end
         applySkin(p, look.face or look.parts[1])
+        if look.watch then setWatch(p, look.watch) end
         if name then
             local label = spawn(world, "/Script/Engine.TextRenderActor", pos)
             p.actors[#p.actors + 1] = label
@@ -464,6 +480,13 @@ Avatar.hidesHair = function() return false end
 -- the default.
 Avatar.looks = {}
 
+-- Watches are EXPERIMENTAL ("Watches", coop/experimental.lua): a figure wears one only in
+-- the game of a player who has switched them on. (What a look says is kept as it came.)
+local function watchWorn(l)
+    if not Core.experimental("Watches") then return nil end
+    return l.watch
+end
+
 -- Turns { body, head, hair, arms } into the body mesh and part list a puppet is built from.
 local function partsOf(l)
     if type(l) ~= "table" or type(l.body) ~= "string" then return LOOKS.player end
@@ -478,7 +501,7 @@ local function partsOf(l)
         if type(l.glasses) == "string" and l.glasses ~= "" then parts[#parts + 1] = l.glasses end
         -- (a piece of another outfit worn over this one: "MESH!word", see build)
         if type(l.over) == "string" and l.over ~= "" then parts[#parts + 1] = l.over end
-        return { body = l.body, parts = parts, face = face }
+        return { body = l.body, parts = parts, face = face, watch = watchWorn(l) }
     end
     local parts = { l.head or "SK_ma_head_01", "Basebody/SK_ma_hands_average" }
     if l.arms then parts[#parts + 1] = "Basebody/SK_ma_arm" end
@@ -486,7 +509,7 @@ local function partsOf(l)
     if type(l.hat) == "string" and l.hat ~= "" then parts[#parts + 1] = l.hat end
     if type(l.glasses) == "string" and l.glasses ~= "" then parts[#parts + 1] = l.glasses end
     if type(l.beard) == "string" and l.beard ~= "" then parts[#parts + 1] = l.beard end
-    return { body = l.body, parts = parts }
+    return { body = l.body, parts = parts, watch = watchWorn(l) }
 end
 
 local function lookOf(id)
@@ -693,6 +716,73 @@ local function wearBag(p, code)
     seatBag(p)
 end
 
+-- A watch on the left wrist: the game's two watch models (made for its women, never worn
+-- by anybody in the game). Neither model has a place on the skeleton to go to, so where
+-- the band's ring lies was measured from the model's points and laid round the wrist
+-- (tools/rig/watch_5.lua); what is below is the result, relative to the forearm's twist
+-- bone, for each body. A man's wrist is thicker: the same watch, larger.
+local WATCH_DIR = "/Game/CitizenNPC/CharacterParts/Meshes/Staticmeshes/"
+local WATCH_BONE = "lowerarm_twist_01_l"
+local WATCHES = {
+    analog = { mesh = "SM_fe_watch_analog_01",
+        f = { loc = { X = 22.184, Y = 0.920, Z = -4.788 }, rot = { Pitch = 40.73, Yaw = -89.63, Roll = 47.01 }, scale = 1.108 },
+        m = { loc = { X = 25.799, Y = 2.582, Z = -3.207 }, rot = { Pitch = 36.49, Yaw = -92.51, Roll = 44.71 }, scale = 1.55 } },
+    digital = { mesh = "SM_fe_watch_digital_01",
+        f = { loc = { X = 22.886, Y = 0.466, Z = -2.746 }, rot = { Pitch = -5.21, Yaw = -100.06, Roll = 50.96 }, scale = 1.108 },
+        m = { loc = { X = 26.670, Y = 1.285, Z = -0.845 }, rot = { Pitch = 5.03, Yaw = -101.23, Roll = 46.95 }, scale = 1.55 } },
+}
+Avatar.WATCHES = WATCHES
+-- Outfits with a sleeve down to the hand: the watch is worn this much lower, below the
+-- cuff (at the wrist it would stick out through the cloth).
+local WATCH_LOWER = {
+    SK_ma_casual_jacket_01_a = 4, SK_ma_casual_jacket_01_b = 4, SK_ma_casual_02_b = 4, SK_ma_casual_02_c = 4, SK_ma_sport_01_a = 4, SK_ma_sport_01_c = 4,
+    SK_ma_construction_worker_01 = 4, SK_ma_construction_worker_01_c = 4, SK_ma_construction_worker_02_b = 4, SK_ma_waiter_01 = 4,
+    SK_ma_business_01 = 4, SK_ma_business_01_b = 4, SK_ma_physician_01 = 6.8,
+    SK_fe_casual_02_a = 5.6, SK_fe_sport_02_b = 4, SK_fe_business_01_a = 4.6, SK_fe_business_01_b = 4.6, SK_fe_business_01_c = 4.6,
+}
+Avatar.WATCH_LOWER = WATCH_LOWER
+local function wearWatch(p, code)
+    local w = WATCHES[code]
+    code = w and code or ""
+    if (p.watchCode or "") == code then return end
+    p.watchCode = code
+    if p.watch then
+        local old = p.watch
+        p.watch = nil
+        for i = #p.actors, 1, -1 do
+            if p.actors[i] == old then table.remove(p.actors, i) end
+        end
+        pcall(function() if valid(old) then old:K2_DestroyActor() end end)
+    end
+    if not w then return end
+    local m = asset(WATCH_DIR .. w.mesh .. "." .. w.mesh)
+    if not m then error("model " .. w.mesh .. " is not available") end
+    local watch = p.body:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.StaticMeshActor"), { X = p.x, Y = p.y, Z = p.z }, { Pitch = 0, Yaw = 0, Roll = 0 })
+    if not valid(watch) then error("model " .. w.mesh .. " could not be made") end
+    watch:SetMobility(2)
+    watch:SetActorEnableCollision(false)
+    watch.StaticMeshComponent:SetStaticMesh(m)
+    p.actors[#p.actors + 1] = watch
+    p.watch = watch
+    local s = p.female and w.f or w.m
+    local lower = WATCH_LOWER[p.bodyMesh or ""] or 0
+    watch:K2_AttachToComponent(p.comp, FName(WATCH_BONE), 2, 2, 2, false)
+    watch:K2_SetActorRelativeLocation({ X = s.loc.X + lower, Y = s.loc.Y, Z = s.loc.Z }, false, {}, true)
+    watch:K2_SetActorRelativeRotation(s.rot, false, {}, true)
+    watch:SetActorRelativeScale3D({ X = s.scale, Y = s.scale, Z = s.scale })
+end
+
+-- (also for stand-ins) "analog", "digital", or anything else for none. A failure is logged
+-- once per figure and leaves it without a watch.
+function Avatar.setWatch(p, code)
+    if not p or not valid(p.body) then return end
+    local ok, e = pcall(wearWatch, p, code)
+    if not ok and not p.watchFailed then
+        p.watchFailed = true
+        log("Could not give a figure its watch: %s", tostring(e))
+    end
+end
+
 -- (also for stand-ins) A failure is logged once per figure and leaves it without a bag.
 function Avatar.setBag(p, code)
     if not p or not valid(p.body) then return end
@@ -838,7 +928,7 @@ local function holdThings(p)
             local wasUp = p.offUp or 0
             p.offBack, p.offSide, p.offYaw, p.offUp = back, side, turn, up
             if not p.own then
-                local at, rot = bodyPlace(p, p.z + FEET_OFFSET)
+                local at, rot = bodyPlace(p, p.z + feetOffset(p))
                 p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
             elseif p.heldStill then
                 local at, rot = bodyPlace(p, p.body:K2_GetActorLocation().Z - wasUp)
@@ -954,7 +1044,7 @@ local function move(p, dt, camera)
         if d2 > 600 * 600 then k = 1 end   -- teleport, do not glide
         p.x, p.y, p.z = p.x + dx * k, p.y + dy * k, p.z + dz * k
         p.yaw = p.yaw + turn * k
-        local at, rot = bodyPlace(p, p.z + FEET_OFFSET)
+        local at, rot = bodyPlace(p, p.z + feetOffset(p))
         p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
     end
     local now = p.ticks % 10 == 0
@@ -986,6 +1076,31 @@ local function move(p, dt, camera)
             anim.Velocity = p.speed
         end)
     end
+    -- another player crouching: the citizens' crouching pose (as the own figure has it; not
+    -- while the hands or the body do something else: phone, call, strut, an emote)
+    if p.isPlayer and not p.own then
+        local f = p.flags or 0
+        local crouch = f & FLAG_CROUCH ~= 0 and (p.emote or 0) == 0 and f & (FLAG_PHONE | FLAG_CALL | FLAG_STRUT) == 0
+        if crouch ~= (p.crouched == true) then
+            p.crouched = crouch
+            pcall(function()
+                if crouch then
+                    local anim = asset(CROUCH_POSE)
+                    if anim then
+                        setSkeleton(p, true)
+                        p.comp:PlayAnimation(anim, true)
+                        p.comp:SetPlayRate(1)
+                        p.phoneAnim, p.jogging = true, false
+                    end
+                else
+                    p.phoneAnim = false
+                    p.pose = false          -- (holdThings puts the right animation back)
+                    toBlueprint(p)
+                    p.walk = nil
+                end
+            end)
+        end
+    end
     if p.isPlayer then
         local state = (p.flags or 0) * 1000 + (p.emote or 0)
         if state ~= 0 or state ~= p.held or p.pose ~= nil or p.smoke ~= nil or now then
@@ -1002,7 +1117,7 @@ local function move(p, dt, camera)
     end
     if p.label and (moving or p.ticks % 3 == 0) and valid(p.label) then
         local face = math.deg(math.atan(camera.Y - p.y, camera.X - p.x))
-        p.label:K2_SetActorLocationAndRotation({ X = p.x, Y = p.y, Z = p.z + FEET_OFFSET + NAME_HEIGHT },
+        p.label:K2_SetActorLocationAndRotation({ X = p.x, Y = p.y, Z = p.z + feetOffset(p) + NAME_HEIGHT - (feetOffset(p) == CROUCH_FEET and 90 or 0) },
             { Pitch = 0, Yaw = face, Roll = 0 }, false, {}, true)
     end
 end
@@ -1091,6 +1206,7 @@ local function held(player)
     local emote = emoteOf(Avatar.localEmote or 0)
     if os.clock() < (Avatar.smokeUntil or 0) or (emote and emote.smoke) then flags = flags | FLAG_SMOKE end
     if Avatar.strut then flags = flags | FLAG_STRUT end
+    pcall(function() if player.isCrouching == true and not Avatar.sendZ then flags = flags | FLAG_CROUCH end end)
     flags = flags | (Avatar.ownBag() << BAG_SHIFT)
     return flags, pitch
 end

@@ -3,7 +3,8 @@
 --
 --   tagTime   a wall tag takes this share of the usual time. The game counts the hold on
 --             the spray marker (sprayPlacementGizmo_C.heldTimer) up to holdTimePlacement;
---             that number is set on the player's marker whenever there is one.
+--             that number is set on the player's marker whenever there is one (twice it
+--             for a tag twice as wide, coop/tags.lua).
 --   drugTime  a drug works this many times as long. Every dose in the body is a record of
 --             its own (HumanoidActor.inBodySubstances): calcRateExcretion is how many game
 --             hours it takes to leave the body, calcRateDecomposition goes with it, and
@@ -43,7 +44,8 @@ local OPENED = "/Game/Audio/Lockpick/lockOpenCue.lockOpenCue"
 
 local usualHold = nil
 
-Core.every(0.3, function()
+-- (every tick: a new marker has the usual time until this has been)
+Core.onTick(function()
     if not live() then return end
     local player = World.player()
     if not player then return end
@@ -57,7 +59,10 @@ Core.every(0.3, function()
         usualHold = v
     end
     local c = Look.active()
-    local want = usualHold * ((c and c.tagTime) or 1)
+    -- (a tag twice as wide takes twice as long: coop/tags.lua)
+    local wide = 1
+    pcall(function() wide = package.loaded["coop.tags"].holdFactor() or 1 end)
+    local want = usualHold * ((c and c.tagTime) or 1) * wide
     pcall(function()
         if math.abs(gizmo.holdTimePlacement - want) > 0.001 then
             gizmo.holdTimePlacement = want

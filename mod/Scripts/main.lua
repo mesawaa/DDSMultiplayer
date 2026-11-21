@@ -66,7 +66,11 @@ Net.listen("lobby", function(kind)
 end)
 Net.listen("left", function() Net.notify("Left the multiplayer lobby") end)
 Net.listen("joined", function(_, name) Net.notify(name .. " joined the lobby") end)
-Net.listen("gone", function(_, name) Net.notify(name .. " left the lobby") end)
+Net.listen("gone", function(id, name)
+    -- (a player the host removed: the host was told so already, and that stays on screen)
+    if S.banned and S.banned[id] then return end
+    Net.notify(name .. " left the lobby")
+end)
 
 ---------------------------------------------------------------- menus
 
@@ -76,6 +80,8 @@ ui.init({
     host = function() host(true) end,
     invite = function() Net.command("INVITE") end,
     leave = leave,
+    -- REMOVE beside a player (host)
+    kick = function(id) Net.kick(id) end,
     -- the MOD OPTIONS entry of the pause menu (coop/options.lua)
     modOptions = function() if M.options then M.options.fromPause() end end,
     world = {
@@ -160,8 +166,14 @@ local function bindKey(name, fn)
         log("Unknown key '%s' in config.lua", tostring(name))
         return
     end
-    -- Key callbacks arrive on UE4SS's input thread.
-    RegisterKeyBind(key, function() ExecuteInGameThread(fn) end)
+    -- Key callbacks arrive on UE4SS's input thread. A key pressed while a chat line is being
+    -- typed (coop/chat.lua) is a letter of that line and nothing else.
+    RegisterKeyBind(key, function()
+        ExecuteInGameThread(function()
+            if Core.typing then return end
+            fn()
+        end)
+    end)
 end
 
 Core.bindKey = bindKey
@@ -198,7 +210,7 @@ end)
 
 M.Core, M.Net, M.ui, M.XP, M.host, M.leave, M.statusText = Core, Net, ui, XP, host, leave, statusText
 
-for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.third", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds", "coop.lotto", "coop.options" }) do
+for _, name in ipairs({ "coop.repl", "coop.world", "coop.guests", "coop.avatar", "coop.dyn", "coop.sync", "coop.npc", "coop.pop", "coop.k9", "coop.story", "coop.facts", "coop.firstsales", "coop.hud", "coop.screen", "coop.emote", "coop.look", "coop.third", "coop.voice", "coop.traits", "coop.thumbs", "coop.clerk", "coop.boutique", "coop.barber", "coop.teammap", "coop.scale", "coop.levels", "coop.eddie", "coop.homes", "coop.casino", "coop.tags", "coop.backups", "coop.wallquest", "coop.shady", "coop.finds", "coop.lotto", "coop.options", "coop.chat", "coop.stack", "coop.calls", "coop.storyworld", "coop.clients" }) do
     local ok, mod = pcall(require, name)
     if ok then
         M[name:match("[^.]+$")] = mod

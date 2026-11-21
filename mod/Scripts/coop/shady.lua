@@ -298,7 +298,13 @@ end
 
 local function signature(list)
     local parts = {}
-    for _, e in ipairs(list) do parts[#parts + 1] = table.concat({ e.id, e.name, tostring(e.level), e.pic, tostring(e.no), tostring(e.on), lookSig(e.look), tostring(e.zone or "") }, "/") end
+    -- (a player's tag changes when they go to another of their tags: the version of it)
+    local Tags = package.loaded["coop.tags"]
+    for _, e in ipairs(list) do
+        local v = ""
+        if e.pic == "tag" and type(Tags) == "table" and Tags.versionOf then pcall(function() v = tostring(Tags.versionOf(e.id)) end) end
+        parts[#parts + 1] = table.concat({ e.id, e.name, tostring(e.level), e.pic, tostring(e.no), tostring(e.on), lookSig(e.look), tostring(e.zone or ""), v }, "/")
+    end
     return table.concat(parts, ";")
 end
 

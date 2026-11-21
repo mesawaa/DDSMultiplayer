@@ -110,11 +110,38 @@ end
 
 ---------------------------------------------------------------- who populates the street
 
+-- The population manager reads DisableSpawning once, when the world begins. What brings
+-- people onto the street afterwards is its timer (`refreshCitizenStatus`, every 11.32 s),
+-- which asks nothing: a game that was not to populate the street still made somebody every
+-- eleven seconds, and the mod took them away again a third of a second later, close enough
+-- to the player to be seen coming and going (measured: 28 in four minutes, some 9 m away;
+-- reported as people "spawning right in front of us"). So the timer itself is stopped, and
+-- started again when this game is to populate the street.
+local CITIZEN_TIMER, CITIZEN_EVERY = "refreshCitizenStatus", 11.32
+local citizenTimerOff = nil     -- the population manager whose timer we stopped
+
+local function setCitizenTimer(population, enabled)
+    local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+    if not valid(ksl) then return end
+    local address = population:GetAddress()
+    if enabled then
+        if citizenTimerOff ~= address then return end       -- never stopped here: it runs
+        citizenTimerOff = nil
+        ksl:K2_SetTimer(population, CITIZEN_TIMER, CITIZEN_EVERY, true)
+    else
+        citizenTimerOff = address
+        ksl:K2_ClearTimer(population, CITIZEN_TIMER)
+    end
+end
+
 local function setSpawners(enabled)
     if enabled then reconcilePopulation() end
     pcall(function()
         local population = Core.find("populationManager_C")
-        if population then population.DisableSpawning = not enabled end
+        if not population then return end
+        population.DisableSpawning = not enabled
+        local ok, e = pcall(setCitizenTimer, population, enabled)
+        if not ok then log("Pop: the passers-by timer could not be %s: %s", enabled and "started" or "stopped", tostring(e)) end
     end)
     pcall(function()
         local police = Core.find("policeManager_C")
@@ -268,15 +295,37 @@ pcall(RegisterHook, "/Script/AIModule.AIBlueprintHelperLibrary:SpawnAIFromClass"
                 Pop.copies[lead.pair] = { npc = npc, family = "police", owner = lead.owner, n = n, engaged = false, bornAt = os.clock(), pair = leadKey }
                 linkPair(leadKey)
             else
+                pcall(function()
+                    local l = npc:K2_GetActorLocation()
+                    local p = World.player():K2_GetActorLocation()
+                    vlog("Pop: a partner a copied patrol lead made is taken away again, %.0f from the player", math.sqrt(dist2(l.X, l.Y, l.Z, p.X, p.Y, p.Z)))
+                end)
                 remove(npc)
                 Pop.stats.suppressed = Pop.stats.suppressed + 1
                 if lead.pair then linkPair(leadKey) end
             end
         elseif together then
+            pcall(function()
+                local l = npc:K2_GetActorLocation()
+                local p = World.player():K2_GetActorLocation()
+                vlog("Pop: a %s (%s) this game made by itself is taken away again, %.0f from the player", fam, npc:GetClass():GetFName():ToString(),
+                    math.sqrt(dist2(l.X, l.Y, l.Z, p.X, p.Y, p.Z)))
+            end)
             remove(npc)
             Pop.stats.suppressed = Pop.stats.suppressed + 1
         else
             adopt(npc, fam)
+            -- (for the log: one of ours that comes to life close to another player)
+            pcall(function()
+                local l = npc:K2_GetActorLocation()
+                for _, id in ipairs(World.others()) do
+                    local x, y, z = Avatar.peerPosition(id)
+                    if x and dist2(l.X, l.Y, l.Z, x, y, z) < 3000 * 3000 then
+                        Pop.stats.bornNear = (Pop.stats.bornNear or 0) + 1
+                        vlog("Pop: a %s of ours came to life %.0f from %s", fam, math.sqrt(dist2(l.X, l.Y, l.Z, x, y, z)), Net.name(id))
+                    end
+                end
+            end)
         end
     end)
 end)
@@ -430,6 +479,16 @@ end
 
 ---------------------------------------------------------------- receiving
 
+-- How far from this game's player a place is (for the log: somebody who appears or is put
+-- in place close to the player is what a player sees as "spawning in front of me").
+local function fromPlayer(x, y, z)
+    local player = World.player()
+    if not player then return math.huge end
+    local l = player:K2_GetActorLocation()
+    return math.sqrt(dist2(x, y, z, l.X, l.Y, l.Z))
+end
+Pop.stats.near, Pop.stats.snaps, Pop.stats.nearSnaps = 0, 0, 0
+
 local function follow(npc, t)
     local loc = npc:K2_GetActorLocation()
     -- Where the original will be by the time the copy has reacted (positions are ~0.5 s old).
@@ -438,6 +497,12 @@ local function follow(npc, t)
     local tx, ty = t.x + math.cos(yaw) * ahead, t.y + math.sin(yaw) * ahead
     local d = dist2(loc.X, loc.Y, loc.Z, tx, ty, t.z)
     if d > TELEPORT * TELEPORT then
+        Pop.stats.snaps = Pop.stats.snaps + 1
+        local away = math.min(fromPlayer(t.x, t.y, t.z), fromPlayer(loc.X, loc.Y, loc.Z))
+        if away < 3000 then
+            Pop.stats.nearSnaps = Pop.stats.nearSnaps + 1
+            vlog("Pop: a copy %.0f behind its original was put in place %.0f from the player", math.sqrt(d), away)
+        end
         npc:K2_SetActorLocationAndRotation({ X = t.x, Y = t.y, Z = t.z + 5 }, { Pitch = 0, Yaw = t.yaw, Roll = 0 }, false, {}, true)
         return
     end
@@ -504,6 +569,11 @@ Net.on("pn", function(sender, data)
             pcall(function() npc:setClientLooks() end)
         end
         Pop.copies[key] = { npc = npc, family = tostring(data.f), owner = sender, n = n, engaged = false, bornAt = os.clock(), pair = pairKey }
+        local away = fromPlayer(data.x, data.y, data.z)
+        if away < 3000 then
+            Pop.stats.near = Pop.stats.near + 1
+            vlog("Pop: a %s of %s appeared %.0f from the player", tostring(data.f), Net.name(sender), away)
+        end
         if data.k == true and k9() then k9().copyHasDog(npc) end
     end)
     applying = false

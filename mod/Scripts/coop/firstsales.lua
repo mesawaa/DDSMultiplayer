@@ -328,7 +328,11 @@ local function tend()
         local client = tonumber(ids[i]) or -1
         if closed[i] ~= "True" and (accepted[i] == "True" or tonumber(newest[client + 1]) == i - 1) then
             local key = Desk.made[i - 1]
-            if not key then
+            -- (besides the orders made here only those of clients 0 to 2, the game's own
+            -- three for a first package: in a world played for long other clients' orders
+            -- of 3 g or 5 g are the host's business, and counting them left a guest's
+            -- piece without an order, 2026-11-19)
+            if not key and client >= 0 and client <= 2 then
                 for j, text in ipairs(drugs) do
                     if text == ordered[i] then
                         key = (j - 1) .. "|" .. tostring(tonumber(grams[i]) or 0)
@@ -360,7 +364,13 @@ local function tend()
         local ok = pcall(function() s:generateNewClient(true) end)
         if ok then Desk.stats.clients = Desk.stats.clients + 1 end
         vlog("First sales: no client without an order, a new one is found (%s)", tostring(ok))
-        return
+        if not ok then return end
+        -- The new client is asked at once: in a world where every client already has an
+        -- order the game gives a new one an order of its own within seconds, and the desk
+        -- found a client without one again and again (2026-11-19, a guest in a level-13 world).
+        ids, closed, newest = get(s, "orderListClientID"), get(s, "orderListClosed"), get(s, "clientsNewestOrderID")
+        free = freeClients(s, ids, closed, newest)
+        if #free == 0 then return end
     end
     local client = free[math.random(#free)]
     local made, why = issue(s, client, pick.k)
@@ -412,6 +422,14 @@ local function reset()
     issueAt, needSince, sentText, sentAt, skip = 0, nil, nil, 0, {}
 end
 World.listen("start", reset)
+
+-- RELOAD of "First clients" (coop/options.lua): orders are looked at again now, clients
+-- that made none are asked again, and a guest tells the host again what it carries.
+function Desk.nudge()
+    issueAt, skip, Desk.clients = 0, {}, 0
+    if needSince then needSince = os.clock() - 10 end
+    sentText = nil
+end
 World.listen("stop", reset)
 
 return Desk

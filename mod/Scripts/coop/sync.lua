@@ -1265,6 +1265,23 @@ function Sync.pushObject(actor)
     return ok
 end
 
+-- The same, but only what has changed since the object was last looked at (the first look
+-- only notes its state): for the few things of the story that the game changes far from
+-- every player and that coop/storyworld.lua looks at on a timer. Returns how many
+-- variables were sent.
+function Sync.watchObject(actor)
+    local targets = World.targets()
+    if #targets == 0 or not Core.alive(actor) then return 0 end
+    local key = Repl.key(actor)
+    if Sync.private[key] then return 0 end
+    local ok, n = pcall(diff, key, actor, actor:GetClass():GetFName():ToString(), false, targets, false)
+    if not ok then
+        log("Sync: watching an object failed: %s", tostring(n))
+        return 0
+    end
+    return n or 0
+end
+
 -- A container that reads open while this game's player has no inventory open is stuck
 -- (older versions sent isOpen across, and saved worlds still have it): the game ignores a
 -- player who tries to open it. When that happens it is opened properly. In single player

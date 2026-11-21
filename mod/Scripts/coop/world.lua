@@ -195,6 +195,8 @@ end
 
 Net.on("world_req", function(sender, data, name)
     if not Net.isHost() then return end
+    -- (a player just removed from the lobby: their request may cross the removal)
+    if Net.S.banned and Net.S.banned[sender] then return end
     if not Core.enabled("World") then
         Net.send("world_no", { reason = "The host has co-op worlds switched off." }, sender)
         return
@@ -1021,6 +1023,9 @@ Net.listen("left", function() stop(World.active and "Co-op world ended: you left
 Net.listen("gone", function(id, name)
     if (World.role == "guest" or World.joining) and id == (World.host or Net.S.owner) then
         local message = "Co-op world ended: " .. name .. " left. You keep playing a copy of their world; it is not saved."
+        if Net.S.kickedAt and os.time() - Net.S.kickedAt < 10 then
+            message = "The host removed you from the lobby. You keep playing a copy of their world; it is not saved."
+        end
         stop(message)
         -- The lobby was the host's. Steam has just made somebody else its owner; nobody
         -- should find and join a lobby without its host, so we leave it.

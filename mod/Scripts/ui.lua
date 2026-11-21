@@ -16,6 +16,8 @@ local st = nil      -- state of the menu being processed right now
 
 local VIS_VISIBLE, VIS_COLLAPSED, VIS_SELF_HIT_TEST_INVISIBLE = 0, 1, 4
 local PANEL_W = 430
+local MAX_ROWS = 16      -- player rows made with the panel (a lobby has 16 players at most)
+local NAME_W = 300       -- the name column of a player row; REMOVE starts after it
 
 local WHITE = { R = 1, G = 1, B = 1, A = 1 }
 local SOFT = { R = 0.72, G = 0.72, B = 0.72, A = 1 }      -- idle panel actions
@@ -220,7 +222,27 @@ local function build(kind, menu)
     addRow(box, st.detail, 0, 14)
     st.playersTitle = label("PLAYERS", st.tplLabel, 14, GREY)
     addRow(box, st.playersTitle, 0, 4)
-    st.players = label("", body, 15, WHITE)
+    -- One row per player, made once (widgets made and dropped while the menu is up are a
+    -- crash risk); for the host a REMOVE beside every other player.
+    st.players = new("VerticalBox")
+    st.playerRows = {}
+    for i = 1, MAX_ROWS do
+        local line = new("HorizontalBox")
+        local nameBox = new("SizeBox")
+        nameBox:SetWidthOverride(NAME_W)
+        local name = label("", body, 15, WHITE)
+        nameBox:AddChild(name)
+        local nameSlot = line:AddChildToHorizontalBox(nameBox)
+        nameSlot:SetVerticalAlignment(2)
+        local kick, kickLabel = menuButton("REMOVE", 15, true)
+        pcall(function() kickLabel.Slot:SetPadding({ Left = 0, Top = 0, Right = 0, Bottom = 0 }) end)
+        local kickSlot = line:AddChildToHorizontalBox(kick)
+        kickSlot:SetVerticalAlignment(2)
+        st.players:AddChildToVerticalBox(line)
+        line:SetVisibility(VIS_COLLAPSED)
+        kick:SetVisibility(VIS_COLLAPSED)
+        st.playerRows[i] = { line = line, name = name, kick = kick, kickLabel = kickLabel }
+    end
     addRow(box, st.players, 0, 14)
 
     local primary, primaryLabel = menuButton("HOST LOBBY", 18, true)
@@ -284,6 +306,9 @@ local function build(kind, menu)
             if opened then UI.close() end
         end },
     }
+    for i, r in ipairs(st.playerRows) do
+        st.buttons[#st.buttons + 1] = { widget = r.kick, label = r.kickLabel, idle = SOFT, hover = WHITE, click = function() UI.kick(i) end }
+    end
     if st.extra then
         st.buttons[#st.buttons + 1] = { widget = st.extra, label = st.extraLabel, click = function()
             UI.close()
@@ -302,11 +327,17 @@ local function refresh()
     local S = C.S
     if S.lobby then st.hostRequested = nil end
     local hosting = st.hostRequested ~= nil and (os.clock() - st.hostRequested) < 10
-    local names = {}
+    local entries, names, ids = {}, {}, {}
     for id, name in pairs(S.members) do
-        names[#names + 1] = (id == S.me) and (name .. "  (you)") or name
+        entries[#entries + 1] = { id = id, label = (id == S.me) and (name .. "  (you)") or name }
     end
-    table.sort(names)
+    table.sort(entries, function(a, b) return a.label < b.label end)
+    for i, e in ipairs(entries) do names[i], ids[i] = e.label, e.id end
+    local isHost = S.lobby ~= nil and S.owner ~= nil and S.owner == S.me
+    local kickAsk = st.kickAsk and os.clock() - st.kickAsk.at < 6 and st.kickAsk.id or nil
+    local banned = {}
+    for id in pairs(S.banned or {}) do banned[#banned + 1] = id end
+    table.sort(banned)
     local notice = S.notice and (os.time() - S.notice.at) < 8 and S.notice.text or nil
     local worldText = C.world and C.world.status() or nil
     local canJoin = C.world ~= nil and C.world.canJoin() == true
@@ -319,7 +350,8 @@ local function refresh()
     local character = st == states.main and canJoin and C.world.character and C.world.character() or nil
     local confirming = character ~= nil and st.overAt ~= nil and os.clock() - st.overAt < 6
     local signature = table.concat({ tostring(S.ready), tostring(S.lobby), tostring(hosting), tostring(notice),
-        tostring(worldText), tostring(canJoin), tostring(autosave), tostring(character), tostring(confirming), table.concat(names, "|") }, "#")
+        tostring(worldText), tostring(canJoin), tostring(autosave), tostring(character), tostring(confirming), table.concat(names, "|"),
+        table.concat(ids, "|"), tostring(isHost), tostring(kickAsk), table.concat(banned, "|") }, "#")
     if signature == st.signature then return end
     st.signature = signature
 
@@ -356,7 +388,20 @@ local function refresh()
 
     st.playersTitle:SetVisibility(inLobby and VIS_SELF_HIT_TEST_INVISIBLE or VIS_COLLAPSED)
     st.players:SetVisibility(inLobby and VIS_SELF_HIT_TEST_INVISIBLE or VIS_COLLAPSED)
-    st.players:SetText(text(table.concat(names, "\n")))
+    for i, r in ipairs(st.playerRows) do
+        local e = inLobby and entries[i] or nil
+        r.id = e and e.id or nil
+        if e then
+            r.line:SetVisibility(VIS_SELF_HIT_TEST_INVISIBLE)
+            r.name:SetText(text(e.label))
+            local canKick = isHost and e.id ~= S.me and not (S.banned and S.banned[e.id])
+            r.kick:SetVisibility(canKick and VIS_VISIBLE or VIS_COLLAPSED)
+            if canKick then r.kickLabel:SetText(text(kickAsk == e.id and "CONFIRM" or "REMOVE")) end
+        else
+            r.line:SetVisibility(VIS_COLLAPSED)
+            r.kick:SetVisibility(VIS_COLLAPSED)
+        end
+    end
 
     st.primaryLabel:SetText(text(inLobby and "INVITE FRIENDS" or "HOST LOBBY"))
     local canAct = S.ready and not hosting
@@ -385,6 +430,20 @@ function UI.primaryAction()
         st.hostRequested = os.clock()
         C.host()
     end
+end
+
+-- REMOVE beside a player (host): asked twice, like START OVER.
+function UI.kick(i)
+    local r = st and st.playerRows and st.playerRows[i]
+    local id = r and r.id
+    if not id then return end
+    if st.kickAsk and st.kickAsk.id == id and os.clock() - st.kickAsk.at < 6 then
+        st.kickAsk = nil
+        if C.kick then C.kick(id) end
+    else
+        st.kickAsk = { id = id, at = os.clock() }
+    end
+    st.signature = nil
 end
 
 function UI.open()

@@ -1403,6 +1403,19 @@ function Quest.shutdown()
     Guests.setSelf = setSelf
 end
 
+-- RELOAD (coop/options.lua): Amy's talk and the step's marker are made anew on the next
+-- look, the organizer and the HUD are drawn again.
+function Quest.reload()
+    if not mine then return false end
+    if hand and not World.gone then pcall(closeHandover, World.player()) end
+    hand = nil
+    pcall(dropMarker)
+    pcall(dropAmy)
+    pcall(refreshTaskList)
+    log("Wall: step %d reloaded", mine.s)
+    return true
+end
+
 -- (for test scripts)
 function Quest.set(step, spent, parts, second)
     if not mine then return false end

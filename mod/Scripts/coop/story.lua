@@ -581,12 +581,13 @@ end
 -- A world that is past the first meeting no longer has the bench Eddie waits on. A
 -- player whose own story still has to meet him gets both back, in their own game only.
 local meetingAt = nil
-local function ensureMeeting(q)
-    local wanted = false
+local function ensureMeeting(q, force)
+    local wanted = force == true
     for _, rec in pairs(Story.own) do
         if rec.key == FIRST_DAY then wanted = true end
     end
     if not wanted or q.metEddie == true then return end
+    if force then meetingAt, meetingTried = nil, 0 end
     -- Looked at again and again while the meeting is still to come: the bench or Eddie can
     -- go missing later (the other player's game takes its own away after their meeting).
     if os.clock() < (meetingAt or 0) then return end
@@ -654,12 +655,19 @@ local function ownHas(key)
     return false
 end
 
--- True while this player still has to fetch their first package.
+-- True while this player still has to fetch their first package (or a package put back
+-- by RELOAD of MOD OPTIONS is still in the drop: `drop.again`).
 local function packagePending(q)
+    if drop.again then return true end
     return q.firstDeadDrop ~= true and (ownHas(FIRST_PACK) or ownHas(FIRST_DAY))
 end
 
 local function tendFirstPackage(q)
+    -- a package put back for a player who had lost theirs: until they have taken it again
+    if drop.again and Core.alive(drop.actor) and not holdsDrugs(drop.actor) and os.clock() > drop.again then
+        drop.again = nil
+        log("Story: the package that was put back has been taken")
+    end
     if not packagePending(q) then
         -- this player has had theirs (or has no such step): the drop is everybody's
         if drop.private then
@@ -1144,6 +1152,14 @@ local function plainMode()
     return World.active and World.role == "guest" and not ready and (not enabled() or plain.hostOff)
 end
 
+-- True while this game plays one storyline with the others: its own setting, or (a guest)
+-- the host's. The whole quest manager is shared then, and what the story does once has to
+-- happen in one game only (coop/calls.lua).
+function Story.oneStoryline()
+    if not World.active then return false end
+    return not enabled() or (World.role == "guest" and plain.hostOff == true)
+end
+
 local function plainNames(s)
     local out = {}
     for _, name in ipairs(Sync.personalNames("statisticsManager_C", s)) do
@@ -1191,11 +1207,105 @@ end)
 
 Story.firstMeetingSeat, Story.firstMeetingEddie = firstMeetingSeat, firstMeetingEddie
 
----------------------------------------------------------------- skipping a step (coop/options.lua)
+---------------------------------------------------------------- reloading a step (coop/options.lua)
 
--- The story steps that are open in this game's task list: { id, name, desc, key } each,
--- oldest first. Orders (sale tasks) and Eddie's debt are no story steps; another
--- player's steps read "completed" here and are not listed either.
+local ATM_CLASS = "/Game/Interactive/atmMachine.atmMachine_C"
+
+-- Puts the first package into its dead drop again, as this player's own (the others'
+-- games keep theirs). Returns true when it is there.
+local function packageAgain(q)
+    drop.searchAt = 0
+    local d = firstDrop()
+    if not d then return false end
+    if World.active and not drop.private then
+        drop.key = Repl.key(d)
+        drop.private = true
+        Sync.setPrivate(drop.key, true)
+        if World.role == "guest" then pcall(function() d:clearContainer() end) end
+    end
+    if holdsDrugs(d) then return true end
+    local ok = pcall(function()
+        d.firstDeadDrop = true
+        d:ExecuteUbergraph_dd_wallVentSmall(15)
+    end)
+    -- (it is taken again by this player alone: the drop stays theirs until it is empty)
+    if ok then drop.given, drop.again = true, os.clock() + 5 end
+    return ok and holdsDrugs(d)
+end
+
+-- What the pockets hold of a first package (drugs of the package's kinds).
+local function carriesPackage()
+    local player = World.player()
+    if not player then return false end
+    local v = Repl.export(player, { "InventoryComponent.ItemNames" })
+    for _, name in ipairs(Repl.splitArray(v["InventoryComponent.ItemNames"] or "()")) do
+        local n = tostring(name):gsub('"', "")
+        if n == "DRUG-MARIHUANA" or n == "DRUG-AMPHETAMINE" then return true end
+    end
+    return false
+end
+
+-- Sets an open story step up again so that the player can do it: whatever the step needs
+-- in the world is put back where the mod knows it, its map marker comes back, a tutorial
+-- tip in the way is closed and the task list is drawn again. Nothing is completed.
+-- Returns the step's name and a list of what was done, or nil when there is no such step.
+function Story.reload(id, expectName)
+    local q = manager()
+    if not q or type(id) ~= "number" or id < 0 or id >= length(q) or closed(q, id) then return nil end
+    local name = ""
+    pcall(function() name = q.taskNames[id + 1]:ToString() end)
+    if expectName and expectName ~= name then return nil end
+    local key = keyOf(q, id)
+    local done = {}
+    pcall(function()
+        if q.tipActive == true then
+            pcall(function() if valid(q.curGameTip) then q.curGameTip:killWidget() end end)
+            q:gameTipEnd()
+            done[#done + 1] = "tip closed"
+        end
+    end)
+    if key == FIRST_DAY then
+        local ok = pcall(ensureMeeting, q, true)
+        if ok and firstMeetingSeat() and firstMeetingEddie() then done[#done + 1] = "Eddie on his bench" end
+    elseif key == FIRST_PACK then
+        if packageAgain(q) then done[#done + 1] = "package in the dead drop" end
+    elseif key == "TASK-FIRST-CLIENTS-DESC" then
+        -- the clients want what the package holds: a player who has none of it gets it back
+        if q.firstSalesDone ~= true and not carriesPackage() then
+            if packageAgain(q) then done[#done + 1] = "package back in the dead drop" end
+        end
+        pcall(function()
+            local Desk = package.loaded["coop.firstsales"]
+            if type(Desk) == "table" and Desk.nudge then Desk.nudge() done[#done + 1] = "orders asked for again" end
+        end)
+    elseif key == "TASK-BANK-DESC" then
+        local n = 0
+        for _, m in ipairs(Core.actors(ATM_CLASS) or {}) do
+            pcall(function()
+                if Core.alive(m) and m.atmActive ~= true then
+                    m:unlockAtm()
+                    n = n + 1
+                end
+            end)
+        end
+        pcall(function() Repl.singleton("mainComputer_C").bankAvailable = true end)
+        done[#done + 1] = n .. " ATM(s) switched on"
+    end
+    -- the step's marker on the map and the compass
+    local rec = Story.own[id]
+    if rec and type(rec.marker) == "table" and not markerOf(id) then
+        spawnMarker(q, id, rec.marker)
+        done[#done + 1] = "map marker"
+    end
+    refreshTaskViews()
+    log("Story: step %d (%s) reloaded: %s", id, tostring(key), #done > 0 and table.concat(done, ", ") or "task list drawn again")
+    return name ~= "" and name or (key or ("step " .. id)), done
+end
+
+-- The story steps that are open in this game's task list (the QUESTS page of
+-- coop/options.lua): { id, name, desc, key } each, oldest first. Orders (sale tasks) and Eddie's debt are no
+-- story steps; another player's steps read "completed" here and are not listed either,
+-- nor are tasks the story does not know (an Eddie package and the like).
 function Story.openSteps()
     local q = manager()
     if not q then return {} end
@@ -1214,46 +1324,23 @@ function Story.openSteps()
             local name, desc = "", rowText(q, id) or ""
             pcall(function() name = q.taskNames[id + 1]:ToString() end)
             if desc:sub(-#TAG) == TAG then desc = desc:sub(1, -#TAG - 1) end
-            if name ~= "" or desc ~= "" then
-                out[#out + 1] = { id = id, name = name, desc = desc, key = keyOf(q, id) }
+            local key = keyOf(q, id)
+            if (name ~= "" or desc ~= "") and key and TASKS[key] then
+                out[#out + 1] = { id = id, name = name, desc = desc, key = key }
             end
         end
     end
     return out
 end
 
--- Completes an open step the way the game does: the step's own event where the game has
--- one (it does what the step was for, an ATM switched on for example), otherwise the
--- quest manager's own completion, which also starts what comes after it. Returns the
--- step's name, or nil when there is no such open step.
-function Story.skip(id, expectName)
-    local q = manager()
-    if not q or type(id) ~= "number" or id < 0 or id >= length(q) or closed(q, id) then return nil end
-    local name = ""
-    pcall(function() name = q.taskNames[id + 1]:ToString() end)
-    if expectName and expectName ~= name then return nil end
+-- For coop/storyworld.lua: the story step a row of the task table is (its key, by what the
+-- row says), or nil for an order, a package of Eddie's and whatever else is no step.
+function Story.stepKey(q, id)
     local key = keyOf(q, id)
-    local info = key and TASKS[key] or {}
-    if info.event then
-        local ok, e = pcall(function() q[info.event](q) end)
-        log("Story: step %d (%s) skipped through %s%s", id, tostring(key), info.event, ok and "" or (": " .. tostring(e)))
-        -- (an event that found nothing to do leaves the step open)
-        Core.after(3, function()
-            if World.gone then return end
-            local now = manager()
-            if now and now:GetAddress() == q:GetAddress() and not closed(now, id) then
-                pcall(function() now:markTaskStatus(id, 1) end)
-                pushSoon()
-            end
-        end)
-    else
-        local ok, e = pcall(function() q:markTaskStatus(id, 1) end)
-        log("Story: step %d (%s) skipped%s", id, tostring(key), ok and "" or (": " .. tostring(e)))
-    end
-    if Story.own[id] then Story.own[id].eventAt = os.clock() end
-    pushSoon()
-    return name ~= "" and name or (key or ("step " .. id))
+    if key and TASKS[key] then return key end
+    return nil
 end
+Story.refreshTaskViews, Story.removeMarkers, Story.taskMarkers = refreshTaskViews, removeMarkers, markers
 
 function Story.isApplying() return applying end
 function Story.hidden() return wire end

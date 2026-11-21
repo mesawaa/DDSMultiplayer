@@ -206,6 +206,14 @@ local M_GLASSES = {
     { name = "Black frames", mesh = "SK_ma_glass_04#MI_glass_01", price = 200, shop = "formal" },
     { name = "Rectangle glasses", mesh = "SK_ma_glass_05#MI_glass_01", price = 200, shop = "formal" },
 }
+-- Watches: the game's two watch models, worn on the left wrist by men and women alike
+-- (coop/avatar.lua). What a player owns of them is kept as "w1", "w2". None to begin with.
+local WATCHES = {
+    { name = "Steel watch", code = "analog", price = 1500 },
+    { name = "Gold watch", code = "digital", price = 6000, shop = "formal" },
+}
+local watchAllowed = { [""] = true }
+for _, w in ipairs(WATCHES) do watchAllowed[w.code] = true end
 -- Men's hats are worn over the hair (where hair sticks through, Bald is free). Every
 -- women's hat takes the hair off: none of their hairstyles fits under one.
 Avatar.hidesHair = function(hatMesh)
@@ -298,7 +306,7 @@ end
 local characterById = {}
 for _, c in ipairs(CHARACTERS) do characterById[c.id] = c end
 
-local state = { gender = "m", other = {}, outfit = "jacket", face = 1, hair = 1, hat = 0, glasses = 0, beard = 0, hairOff = false, character = "hustler", owned = { jacket = true }, ownedHair = {}, ownedGlasses = {}, characterPicked = false, roster = ROSTER }
+local state = { gender = "m", other = {}, outfit = "jacket", face = 1, hair = 1, hat = 0, glasses = 0, watch = 0, beard = 0, hairOff = false, character = "hustler", owned = { jacket = true }, ownedHair = {}, ownedGlasses = {}, ownedWatches = {}, characterPicked = false, roster = ROSTER }
 
 ---------------------------------------------------------------- what is owned, per save
 
@@ -329,6 +337,20 @@ local function glassesOf(key)
     local f, n = tostring(key):match("^(f?)g(%d+)$")
     if not n then return nil end
     return (f == "f" and F_GLASSES or M_GLASSES)[tonumber(n)]
+end
+-- the same for watches ("w2"), which are the same for everybody
+local function wk(i) return "w" .. tostring(i) end
+local function watchOf(key)
+    local n = tostring(key):match("^w(%d+)$")
+    return n and WATCHES[tonumber(n)] or nil
+end
+-- Watches are EXPERIMENTAL ("Watches", coop/experimental.lua): without the switch there is
+-- no WATCHES tab, nothing is worn and nothing is told to the others. What is owned stays.
+local function watchesOn() return Core.experimental("Watches") end
+local function watchCode()
+    if not watchesOn() then return "" end
+    local w = WATCHES[state.watch or 0]
+    return w and w.code or ""
 end
 local function hatMesh()
     local h = (state.hat or 0) > 0 and S().hair[state.hat] or nil
@@ -403,6 +425,13 @@ local function load()
     state.hairOff = data.hairOff == true
     local g = tonumber(data.glasses) or 0
     if S().glasses[g] and state.ownedGlasses[gk(g)] then state.glasses = g else state.glasses = 0 end
+    if type(data.ownedWatches) == "table" then
+        for id, v in pairs(data.ownedWatches) do
+            if watchOf(id) and v == true then state.ownedWatches[tostring(id)] = true end
+        end
+    end
+    local w = tonumber(data.watch) or 0
+    if WATCHES[w] and state.ownedWatches[wk(w)] then state.watch = w else state.watch = 0 end
     local kind = FORMER[data.character] or data.character
     if characterById[kind] then state.character = kind end
     state.characterPicked = data.characterPicked == true
@@ -462,18 +491,20 @@ local function applyOwned(record)
         src = state.legacy
     end
     src = type(src) == "table" and src or {}
-    state.owned, state.ownedHair, state.ownedGlasses = {}, {}, {}
+    state.owned, state.ownedHair, state.ownedGlasses, state.ownedWatches = {}, {}, {}, {}
     for id in pairs(copyTrue(src.owned)) do if byId[id] then state.owned[id] = true end end
     for id in pairs(copyTrue(src.hair)) do if hatOf(id) then state.ownedHair[id] = true end end
     for id in pairs(copyTrue(src.glasses)) do if glassesOf(id) then state.ownedGlasses[id] = true end end
+    for id in pairs(copyTrue(src.watches)) do if watchOf(id) then state.ownedWatches[id] = true end end
     if not (byId[state.outfit] and byId[state.outfit].starter) and not state.owned[state.outfit] then state.outfit = S().default end
     if (state.hat or 0) > 0 and not state.ownedHair[hk(state.hat)] then state.hat = 0 end
     if (state.glasses or 0) > 0 and not state.ownedGlasses[gk(state.glasses)] then state.glasses = 0 end
+    if (state.watch or 0) > 0 and not state.ownedWatches[wk(state.watch)] then state.watch = 0 end
 end
 
 -- The choice and what is owned, to go with the save (and, for a guest, to the host).
 local function syncSelf()
-    Guests.setSelf({ character = state.character, owned = copyTrue(state.owned), hair = copyTrue(state.ownedHair), glasses = copyTrue(state.ownedGlasses) })
+    Guests.setSelf({ character = state.character, owned = copyTrue(state.owned), hair = copyTrue(state.ownedHair), glasses = copyTrue(state.ownedGlasses), watches = copyTrue(state.ownedWatches) })
 end
 
 function Look.startOver()
@@ -486,7 +517,7 @@ end
 
 function Look.current()
     load()
-    return { body = byId[state.outfit].body, head = S().faces[state.face], hair = hairWorn(), hat = hatMesh(), glasses = glassesMesh(), beard = beardWorn(), arms = true }
+    return { body = byId[state.outfit].body, head = S().faces[state.face], hair = hairWorn(), hat = hatMesh(), glasses = glassesMesh(), beard = beardWorn(), watch = watchCode(), arms = true }
 end
 
 local function describe(owner)
@@ -495,7 +526,8 @@ local function describe(owner)
     local beard, beardColour = split(l.beard)
     -- (the colours in fields of their own: a game of an older version reads the meshes as it
     -- always did and shows them in the colour they come in)
-    return { b = l.body, h = l.head, r = hair, c = l.hat, g = l.glasses, w = beard, hc = hairColour, bc = beardColour, p = owner }
+    -- (wt: the watch, "" for none; a game of before the watches does not read it)
+    return { b = l.body, h = l.head, r = hair, c = l.hat, g = l.glasses, w = beard, hc = hairColour, bc = beardColour, wt = l.watch, p = owner }
 end
 
 -- Tells the other players in the world how we look.
@@ -522,11 +554,12 @@ Net.on("look", function(sender, data)
     if not bodyAllowed[body] or not faceAllowed[head] or not hairAllowed[hair] or not glassesAllowed[glasses] or not beardAllowed[beard] or not hairAllowed[hat] then return end
     local hairColour = type(data.hc) == "string" and hairColourAllowed[data.hc] and data.hc or nil
     local beardColour = type(data.bc) == "string" and hairColourAllowed[data.bc] and data.bc or nil
-    Avatar.setLook(who, { body = "" .. body, head = head, hair = dressed(hair, hairColour), hat = hat, glasses = glasses, beard = dressed(beard, beardColour), arms = true })
+    local watch = type(data.wt) == "string" and watchAllowed[data.wt] and data.wt or ""
+    Avatar.setLook(who, { body = "" .. body, head = head, hair = dressed(hair, hairColour), hat = hat, glasses = glasses, beard = dressed(beard, beardColour), watch = watch, arms = true })
     vlog("Look: %s wears %s", Net.name(who), body)
     if World.role == "host" then
         for id in pairs(World.inWorld) do
-            if id ~= sender then Net.send("look", { b = body, h = head, r = hair, c = hat, g = glasses, w = beard, hc = hairColour, bc = beardColour, p = sender }, id) end
+            if id ~= sender then Net.send("look", { b = body, h = head, r = hair, c = hat, g = glasses, w = beard, hc = hairColour, bc = beardColour, wt = watch, p = sender }, id) end
         end
     end
 end)
@@ -732,6 +765,7 @@ local function shownLook()
         if preview.hair ~= nil then l.hair = preview.hair end
         if preview.hat ~= nil then l.hat = preview.hat end
         if preview.glasses ~= nil then l.glasses = preview.glasses end
+        if preview.watch ~= nil then l.watch = preview.watch end
         if preview.beard ~= nil then l.beard = preview.beard end
     end
     return l
@@ -791,7 +825,7 @@ local function showMirror()
     local player = World.player()
     if not player then return end
     local l = shownLook()
-    local key = l.body .. "|" .. l.head .. "|" .. l.hair .. "|" .. tostring(l.hat) .. "|" .. tostring(l.glasses) .. "|" .. tostring(l.beard)
+    local key = l.body .. "|" .. l.head .. "|" .. l.hair .. "|" .. tostring(l.hat) .. "|" .. tostring(l.glasses) .. "|" .. tostring(l.beard) .. "|" .. tostring(l.watch)
     local loc = player:K2_GetActorLocation()
     local yaw = player:K2_GetActorRotation().Yaw
     pcall(function() yaw = player:GetControlRotation().Yaw end)
@@ -1335,6 +1369,8 @@ local OTHER_GOODS = {
 
 -- What the grid shows: everything there is at the shop, what the player owns at a wardrobe.
 local function shopItems()
+    -- (watches switched off since the tab was last open)
+    if not watchesOn() and shopTab == "watches" then shopTab = "all" end
     local items = {}
     local mine = Look.page == "wardrobe"
     -- the formal store has formal wear only; Marco everything else, hats and glasses
@@ -1405,6 +1441,21 @@ local function shopItems()
             end
         end
     end
+    if watchesOn() and (shopTab == "all" or shopTab == "watches") then
+        local now = state.watch or 0
+        items[#items + 1] = { name = "No watch", kind = "Watch", watch = "", price = 0, owned = true, on = now == 0,
+            slot = "watch", tried = preview ~= nil and preview.watch == "", try = function() tryOn("watch", "") end,
+            take = function() state.watch = 0 end, own = function() end }
+        for i, w in ipairs(WATCHES) do
+            local owned = state.ownedWatches[wk(i)] == true
+            if (owned or not mine) and (mine or formal == (w.shop == "formal")) then
+                items[#items + 1] = { name = w.name, kind = "Watch", watch = w.code, price = w.price, owned = owned,
+                    on = now == i, slot = "watch", tried = preview ~= nil and preview.watch == w.code,
+                    try = function() tryOn("watch", w.code) end,
+                    take = function() state.watch = i end, own = function() state.ownedWatches[wk(i)] = true end }
+            end
+        end
+    end
     -- OTHER, at the formal store: things that are not worn. Bought again every time.
     if formal and (shopTab == "all" or shopTab == "other") then
         for _, o in ipairs(OTHER_GOODS) do
@@ -1436,6 +1487,7 @@ renderShop = function()
     put(top, 1 - LEFT, 0.05, BUTTON_INSET * 1.5, 0, 1, 0.5)
     -- the tabs: one row starting at the left margin, the same distance between them
     local tabs = { { "all", "ALL" }, { "outfits", "OUTFITS" }, { "hair", "HAIR" }, { "hats", "HATS" }, { "glasses", "GLASSES" } }
+    if watchesOn() then tabs[#tabs + 1] = { "watches", "WATCHES" } end
     if not mine and Look.store ~= nil and Look.store.ID == "formal" then tabs[#tabs + 1] = { "other", "OTHER" } end
     local bar = scr.new("HorizontalBox")
     for i, t in ipairs(tabs) do
@@ -1517,6 +1569,9 @@ renderShop = function()
             pic = Thumbs.image(scr, "b|" .. it.body .. "|" .. now.head, { look = { body = it.body, head = now.head, hair = now.hair, arms = true }, shot = "body" }, 120, 180)
         elseif it.glasses then
             pic, gap = Thumbs.image(scr, "g|" .. it.glasses .. "|" .. now.head .. "|" .. now.hair, { look = { body = now.body, head = now.head, hair = now.hair, glasses = it.glasses, arms = true }, shot = "face" }, 120, 120), 30
+        elseif it.watch then
+            -- (the wrist, in the outfit the player wears: under a sleeve a watch sits lower)
+            pic, gap = Thumbs.image(scr, "w|" .. it.watch .. "|" .. now.body, { look = { body = now.body, head = now.head, hair = now.hair, watch = it.watch, arms = true }, shot = "wrist" }, 120, 120), 30
         else
             if it.hat then
                 -- (a hat on a bald head, so that the hat itself is what the picture shows;
@@ -1538,7 +1593,7 @@ renderShop = function()
             end
         end
         local cell = tile(tileW, mine and 306 or 330, it.name, { it.kind }, corner, color, buttons, it.on, pic, gap, onCard,
-            it.body or it.hair or (it.hat and ("hat:" .. it.hat)) or ("glasses:" .. it.glasses))
+            it.body or it.hair or (it.hat and ("hat:" .. it.hat)) or (it.glasses and ("glasses:" .. it.glasses)) or ("watch:" .. it.watch))
         local slot = wrap:AddChild(cell)
         pcall(function() slot:SetPadding({ Left = 0, Top = 0, Right = GAP, Bottom = GAP }) end)
         ::continue::
@@ -2120,7 +2175,7 @@ Core.onTick(function()
     pcall(function() if model:IsVisible() then model:SetVisibility(false, false) end end)
     load()
     local look = Look.current()
-    local key = table.concat({ look.body or "", look.head or "", look.hair or "", look.hat or "", look.glasses or "", look.beard or "" }, "|")
+    local key = table.concat({ look.body or "", look.head or "", look.hair or "", look.hat or "", look.glasses or "", look.beard or "", look.watch or "" }, "|")
     local modelAt = model:GetAddress()
     if invFigure and invFigure.key == key and invFigure.modelAt == modelAt and valid(invFigure.fig.body) then return end
     if invFigure then pcall(Avatar.destroyStandIn, invFigure.fig) end
@@ -2297,7 +2352,7 @@ World.listen("peer", function(id)
         if other ~= id and type(l) == "table" then
             local hair, hairColour = split(l.hair)
             local beard, beardColour = split(l.beard)
-            Net.send("look", { b = l.body, h = l.head, r = hair, c = l.hat or "", g = l.glasses or "", w = beard, hc = hairColour, bc = beardColour, p = other }, id)
+            Net.send("look", { b = l.body, h = l.head, r = hair, c = l.hat or "", g = l.glasses or "", w = beard, hc = hairColour, bc = beardColour, wt = l.watch or "", p = other }, id)
         end
     end
 end)

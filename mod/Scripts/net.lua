@@ -8,7 +8,7 @@ local json = require("json")
 
 local Net = {}
 
-local PROTOCOL = 26
+local PROTOCOL = 27         -- 27: v0.19 tags (three a player, wide ones, coats, colours of their own)
 local VERSION = "?"
 pcall(function() VERSION = require("core").VERSION end)
 
@@ -25,6 +25,8 @@ local S = {
     peerProto = {},      -- peer id -> protocol number from its hello
     peerVersion = {},    -- peer id -> mod version from its hello (nil before v0.8.5)
     notice = nil,        -- { text, at } last user-facing message
+    banned = {},         -- host: id -> name of the players removed from this lobby
+    kickedFrom = {},     -- lobby id -> true: the host of that lobby removed us
 }
 Net.S = S
 Net.json = json
@@ -190,6 +192,31 @@ end
 
 function Net.ipcDir() return dir end
 
+---------------------------------------------------------------- removing a player
+
+-- Host: removes a player from the lobby. Everybody is told: the player's own game leaves,
+-- the others stop listening to it. (BAN is for a bridge that can stop listening to a
+-- player; the installed one ignores it, and then the message alone does it.) An older
+-- version of the mod does not leave by itself.
+function Net.kick(id)
+    id = tostring(id)
+    if not Net.isHost() or id == S.me or not S.members[id] or S.banned[id] then return false end
+    local name = S.members[id]
+    local lobby = S.lobby
+    S.banned[id] = name
+    Net.send("kick", { id = id })
+    local ok, Core = pcall(require, "core")
+    if ok and type(Core) == "table" and Core.after then
+        Core.after(1.5, function()
+            if S.lobby == lobby and S.banned[id] then Net.command("BAN " .. id) end
+        end)
+    else
+        Net.command("BAN " .. id)
+    end
+    Net.notify(name .. " was removed from the lobby")
+    return true
+end
+
 ---------------------------------------------------------------- events from the bridge
 
 local function onMessage(senderId, senderName, payload)
@@ -217,7 +244,16 @@ local function onEvent(line)
     elseif kind == "LOBBY" then
         local isNew = S.lobby ~= f[2]
         S.lobby, S.owner = f[2], f[4]
-        if isNew then fire("lobby", f[3]) end
+        if isNew then
+            S.banned = {}
+            fire("lobby", f[3])
+            -- (a Steam invite or "Join game" leads past Net.joinLobby: a lobby whose host
+            -- removed us is left again at once)
+            if f[3] == "joined" and S.kickedFrom[f[2]] then
+                Net.command("LEAVE")
+                Net.notify("The host removed you from that lobby.")
+            end
+        end
     elseif kind == "MEMBERS" then
         local old = S.members
         S.members, S.memberCount = {}, tonumber(f[2]) or 0
@@ -238,6 +274,13 @@ local function onEvent(line)
         for id, name in pairs(S.members) do
             if not old[id] and id ~= S.me then
                 Net.send("hello", { proto = PROTOCOL, v = VERSION }, id)
+                -- a newcomer learns whom the host has removed (they may still be in the
+                -- Steam lobby, and nobody is to listen to them)
+                if Net.isHost() and next(S.banned) then
+                    local ids = {}
+                    for b in pairs(S.banned) do ids[#ids + 1] = b end
+                    Net.send("bans", { ids = ids }, id)
+                end
                 fire("joined", id, name)
             end
         end
@@ -260,11 +303,17 @@ local function onEvent(line)
         local old = S.members
         S.lobby, S.owner, S.members, S.memberCount, S.links = nil, nil, {}, 0, {}
         S.peerProto, S.peerVersion = {}, {}
+        S.banned = {}
         if was then
             for id, name in pairs(old) do
                 if id ~= S.me then fire("gone", id, name) end
             end
             fire("left")
+            -- (said after everything leaving says, so that it is what stays on screen)
+            if S.kickedAt and os.time() - S.kickedAt < 10 then
+                S.kickedAt = nil
+                Net.notify("The host removed you from the lobby.")
+            end
         end
     elseif kind == "ERR" then
         Net.notify("Error: " .. (f[2] or "?"))
@@ -279,6 +328,29 @@ Net.on("hello", function(sender, data, name)
     if data.proto ~= PROTOCOL then
         Net.notify(string.format("%s has mod version %s, you have %s: both players need the same version",
             name, S.peerVersion[sender] or "older", VERSION))
+    end
+end)
+
+-- The host removes a player: that player's game leaves the lobby, everybody else stops
+-- listening to it.
+Net.on("kick", function(sender, data)
+    if sender ~= S.owner or sender == S.me then return end
+    local id = tostring(data.id or "")
+    if id == S.me then
+        S.kickedAt = os.time()
+        if S.lobby then S.kickedFrom[S.lobby] = true end
+        Net.command("LEAVE")
+    elseif id:match("^%d+$") then
+        Net.command("BAN " .. id)
+    end
+end)
+
+-- Whom the host removed before we came.
+Net.on("bans", function(sender, data)
+    if sender ~= S.owner or sender == S.me or type(data.ids) ~= "table" then return end
+    for _, id in ipairs(data.ids) do
+        id = tostring(id)
+        if id ~= S.me and id:match("^%d+$") then Net.command("BAN " .. id) end
     end
 end)
 

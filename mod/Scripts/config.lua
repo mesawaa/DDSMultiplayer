@@ -12,8 +12,11 @@ return {
     StrutKey = "CAPS_LOCK",
     -- The interaction key of the mod's own places: the clothes shop, the card room's door.
     WardrobeKey = "U",
-    -- Open the MOD OPTIONS screen (also in the pause menu): skip a stuck story step, repairs, settings.
+    -- Open the MOD OPTIONS screen (also in the pause menu): repairs, settings, reload a stuck story step.
     ModOptionsKey = "F9",
+    -- Open the chat line: Enter sends what you typed to everybody in the lobby, Escape
+    -- closes it. "/" is the slash key; "ENTER" works too. "NONE" switches the chat key off.
+    ChatKey = "/",
     -- Show the other players on the map and the compass.
     ShowPlayersOnMap = true,
 
@@ -65,6 +68,11 @@ return {
     CardRoomStandUpSeconds = 3,
     -- Switch between the first-person view and a view from close behind your character.
     ThirdPersonKey = "P",
+    -- While the spray marker is on a wall: the next of your own tags (you can keep three),
+    -- and more coats of paint (one, two or three: the tag lasts that many times as long and
+    -- takes that many times the sprays).
+    TagNextKey = "R",
+    TagPaintKey = "C",
     -- false: an emote does not switch to that view by itself.
     EmoteThirdPerson = true,
     CasinoBets = { 50, 100, 250, 500, 1000, 2500 },
@@ -126,4 +134,9 @@ return {
     -- Write every XP and sync decision to the log (ipc/mod.log). Useful when reporting a
     -- problem; leave off for normal play.
     Verbose = false,
+
+    -- New features that are not fully tested yet. Each is off until it is switched on
+    -- here (Name = true) or on the EXPERIMENTAL page of MOD OPTIONS, which lists them.
+    Experimental = {
+    },
 }

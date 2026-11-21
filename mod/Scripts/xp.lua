@@ -193,9 +193,16 @@ end
 
 local function shareOrKeep(amount, kind, why)
     if kind == "story" then
-        S.stats.story = S.stats.story + amount
-        vlog("XP %.1f (%s): storyline, kept local", amount, why)
-        return
+        -- With one storyline for everybody a step is done once, by one player, for all of
+        -- them: its XP is shared like that of any other task.
+        local Story = package.loaded["coop.story"]
+        local one = type(Story) == "table" and Story.oneStoryline ~= nil and Story.oneStoryline() == true
+        if not one then
+            S.stats.story = S.stats.story + amount
+            vlog("XP %.1f (%s): storyline, kept local", amount, why)
+            return
+        end
+        why = tostring(why) .. ", one storyline"
     end
     if not Net.hasPeers() then
         vlog("XP %.1f (%s): shareable, not in a lobby", amount, why)

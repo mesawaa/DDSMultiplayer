@@ -3,7 +3,7 @@
 
 local Core = {}
 
-Core.VERSION = "0.18.2"
+Core.VERSION = "0.19.1"
 Core.config = require("config")
 Core.instance = nil      -- set from the command line (-ddsmp=NAME), nil normally
 Core.logFile = nil       -- extra log file, set once the ipc directory is known
@@ -338,6 +338,14 @@ end
 function Core.enabled(feature)
     local sync = Core.config.Sync
     return not sync or sync[feature] ~= false
+end
+
+-- True when the player has opted in to a feature that is not fully tested yet (the
+-- Experimental table of config.lua, the EXPERIMENTAL page of MOD OPTIONS; default off).
+-- The features are listed in coop/experimental.lua.
+function Core.experimental(feature)
+    local e = Core.config.Experimental
+    return type(e) == "table" and e[feature] == true
 end
 
 ---------------------------------------------------------------- hooks
