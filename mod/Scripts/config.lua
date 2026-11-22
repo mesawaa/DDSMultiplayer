@@ -1,4 +1,7 @@
 -- DDS Multiplayer configuration. Edit, then restart the game.
+-- What you change on the MOD OPTIONS screen is also kept in settings.lua, one folder up, so
+-- that an update of the mod (which replaces this file) does not lose it. A value in
+-- settings.lua counts over the one here: delete that file to go back to this one.
 return {
     -- Create a Steam lobby (if needed) and open the Steam invite dialog.
     HostInviteKey = "F6",

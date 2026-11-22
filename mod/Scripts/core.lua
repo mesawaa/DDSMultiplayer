@@ -3,7 +3,7 @@
 
 local Core = {}
 
-Core.VERSION = "0.19.3"
+Core.VERSION = "0.19.4"
 Core.config = require("config")
 Core.instance = nil      -- set from the command line (-ddsmp=NAME), nil normally
 Core.logFile = nil       -- extra log file, set once the ipc directory is known
@@ -16,6 +16,38 @@ local function modDir()
 end
 
 Core.MOD_DIR = modDir()
+
+-- The player's own settings: every value changed on the MOD OPTIONS screen is also kept in
+-- settings.lua beside the Scripts folder ("return { Key = value, Sync = { ... }, ... }"),
+-- because an update of the mod brings a new config.lua. Its values are put over config.lua's
+-- here, before any module reads them; coop/options.lua writes the file and puts the values
+-- back into a new config.lua. A setting config.lua no longer has, or has as another kind of
+-- value, is passed over.
+Core.SETTINGS_FILE = Core.MOD_DIR .. "/settings.lua"
+Core.kept = {}
+do
+    local f = io.open(Core.SETTINGS_FILE, "rb")
+    local text = f and f:read("a")
+    if f then f:close() end
+    local fn = text and load(text, "=settings.lua", "t", {})
+    local ok, kept = pcall(function() return fn and fn() end)
+    if ok and type(kept) == "table" then
+        Core.kept = kept
+        for key, value in pairs(kept) do
+            if type(value) == "table" then
+                -- (the tables of switches: Sync, Experimental)
+                if Core.config[key] == nil then Core.config[key] = {} end
+                if type(Core.config[key]) == "table" then
+                    for name, v in pairs(value) do
+                        if type(v) == "boolean" then Core.config[key][name] = v end
+                    end
+                end
+            elseif type(Core.config[key]) == type(value) then
+                Core.config[key] = value
+            end
+        end
+    end
+end
 
 function Core.log(fmt, ...)
     local ok, text = pcall(string.format, fmt, ...)

@@ -293,6 +293,47 @@ local function literal(v)
     return (string.format("%.2f", v):gsub("0+$", ""):gsub("%.$", ""))
 end
 
+-- The player's own settings file (Core.SETTINGS_FILE, read by core.lua when the game starts):
+-- everything written into config.lua from this screen is noted there too, so that it is
+-- still known after an update has brought a new config.lua.
+local restoring = false
+
+local function keep(key, tbl, value)
+    if restoring then return end
+    local kept = Core.kept
+    if tbl then
+        if type(kept[tbl]) ~= "table" then kept[tbl] = {} end
+        kept[tbl][key] = value
+    else
+        kept[key] = value
+    end
+    local function sorted(t, tables)
+        local names = {}
+        for name, v in pairs(t) do
+            if type(name) == "string" and name:match("^[%a_][%w_]*$") and (type(v) == "table") == tables then names[#names + 1] = name end
+        end
+        table.sort(names)
+        return names
+    end
+    local out = { "-- DDS1 Co-op: your settings from the MOD OPTIONS screen. An update of the mod keeps this file.",
+        "-- Its values count over config.lua's. Delete the file to go back to what config.lua says.", "return {" }
+    for _, name in ipairs(sorted(kept, false)) do out[#out + 1] = "    " .. name .. " = " .. literal(kept[name]) .. "," end
+    for _, name in ipairs(sorted(kept, true)) do
+        out[#out + 1] = "    " .. name .. " = {"
+        for _, inner in ipairs(sorted(kept[name], false)) do out[#out + 1] = "        " .. inner .. " = " .. literal(kept[name][inner]) .. "," end
+        out[#out + 1] = "    },"
+    end
+    out[#out + 1] = "}"
+    local text = table.concat(out, "\r\n") .. "\r\n"
+    local tmp = Core.SETTINGS_FILE .. ".tmp"
+    local f = io.open(tmp, "wb")
+    if not f then return end
+    f:write(text)
+    f:close()
+    os.remove(Core.SETTINGS_FILE)
+    if not os.rename(tmp, Core.SETTINGS_FILE) then log("Options: settings.lua could not be written") end
+end
+
 -- Writes one value into config.lua, keeping every comment and line as it is. `where` says
 -- which table of the file the key is in: false = the file's own, true = Sync, a name =
 -- that table (put at the end of the file when it is not there yet). Returns true when the
@@ -376,7 +417,40 @@ local function writeValue(key, where, value)
         return false
     end
     os.remove(CONFIG .. ".bak")
+    keep(key, tbl, value)
     return true
+end
+
+-- After an update: what settings.lua holds and the new config.lua does not say is written
+-- into it, so the file and this screen show what the game runs with (core.lua has put the
+-- values over config.lua's already). Only settings the new config.lua still has.
+local function restoreKept()
+    local file = evaluate(readFile() or "")
+    if not file then return end
+    local count = 0
+    restoring = true
+    for key, value in pairs(Core.kept) do
+        if type(value) == "table" then
+            if key == "Sync" or key == "Experimental" then
+                for name, v in pairs(value) do
+                    local has = type(file[key]) == "table" and file[key][name]
+                    local known = key == "Experimental" or (type(file[key]) == "table" and file[key][name] ~= nil)
+                    if type(v) == "boolean" and known and has ~= v and not (key == "Experimental" and v == false and has == nil) then
+                        if writeValue(name, key == "Sync" and true or key, v) then count = count + 1 end
+                    end
+                end
+            end
+        elseif type(file[key]) == type(value) and file[key] ~= value then
+            if writeValue(key, false, value) then count = count + 1 end
+        end
+    end
+    restoring = false
+    if count > 0 then log("Options: %d of your settings put back into config.lua (settings.lua)", count) end
+end
+do
+    local ok, err = pcall(restoreKept)
+    restoring = false
+    if not ok then log("Options: settings.lua could not be put back: %s", tostring(err)) end
 end
 
 local function current(s)
