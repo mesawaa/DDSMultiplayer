@@ -496,8 +496,7 @@ local function layBack()
             scr.place(scr.sized(img, SIZE, SIZE), 0.14, 0.5, (k - 2) * STEP - 44, y)
         end
         local pays = #r == 2 and TWO_LOW or PAYS[r[1]]
-        -- (two of the first picture pay wherever they are on the row)
-        scr.place(scr.text("x" .. pays .. (#r == 2 and "     ANY TWO" or ""), "button", 22), 0.14, 0.5, STEP + 6, y, 0)
+        scr.place(scr.text("x" .. pays, "button", 22), 0.14, 0.5, STEP + 6, y, 0)
     end
 end
 
@@ -724,8 +723,10 @@ function Slots.enter()
         return false
     end
     local m = row.machines[index]
+    -- (how high the eyes are above the player's middle: the same standing and crouching)
     local eye = 64
     pcall(function() eye = player.Camera:K2_GetComponentLocation().Z - player:K2_GetActorLocation().Z end)
+    Casino.standUp(player)
     seat = {
         index = index, owner = player:GetAddress(),
         -- where the player is held (the view), and where the others see the figure

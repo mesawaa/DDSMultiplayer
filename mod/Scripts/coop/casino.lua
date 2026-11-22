@@ -328,6 +328,27 @@ local function setGhost(player, on)
     end
 end
 Casino.ghost = setGhost
+
+-- A crouching player stands up before sitting down, the game's own way out of a crouch:
+-- crouched, the player's middle is half as high and every height a seat works with is off.
+-- The game does not let a player up where it finds no room overhead (under something low,
+-- or held in a seat); the player is on the way to a seat, so what the game does once it
+-- has found room is done here then. Returns whether the player was crouching.
+local function standUp(player)
+    local was = false
+    pcall(function()
+        if player.IsCrouching ~= true then return end
+        was = true
+        player:breakCrouch()
+        if player.IsCrouching == true then
+            player.IsCrouching = false
+            player.movementSpeedMultiplier = 0.5
+            player.CrouchAnim:Reverse()
+        end
+    end)
+    return was
+end
+Casino.standUp = standUp
 Casino.ghostState = function() return ghost end
 
 ---------------------------------------------------------------- the lounge's level
@@ -548,7 +569,24 @@ local TRACKS = {
     "TwoTowers/HardcoreMedium_02_KosmaDDS", "TwoTowers/HardcoreMedium_03_KosmaDDS", "TwoTowers/HardcoreMedium_08_KosmaDDS",
     "TwoTowers/HardcoreMedium_09_KosmaDDS",
 }
-local dj = { index = nil, startedAt = 0, length = 0, playing = nil }
+-- index: the game's track (TRACKS); custom: instead a track of the host's own music folder
+-- (the music addon, coop/music.lua; index is 0 then). playing: what this game
+-- plays now (the index, the custom id, or "fallback").
+local dj = { index = nil, custom = nil, startedAt = 0, length = 0, playing = nil }
+
+local function musicModule()
+    local M = package.loaded["coop.music"]
+    if type(M) == "table" and M.enabled and M.enabled() then return M end
+    return nil
+end
+
+-- A guest without the host's file (yet) hears one of the game's tracks in its place, the
+-- same one in every such game.
+local function fallbackIndex(id)
+    local h = 0
+    for i = 1, #tostring(id) do h = (h * 31 + tostring(id):byte(i)) % 1000003 end
+    return CLUB_SET + 1 + h % (#TRACKS - CLUB_SET)
+end
 
 local function clubSpeaker()
     local speaker = nil
@@ -619,17 +657,39 @@ end
 
 -- Starts the current track on our speaker, `offset` seconds in.
 local function playTrack(offset)
-    local speaker, wave = clubSpeaker(), track(dj.index)
-    if not speaker or not wave then return end
+    local speaker = clubSpeaker()
+    if not speaker then return end
+    local index = dj.index
+    if dj.custom then
+        local M = musicModule()
+        if M and M.playClub(dj.custom, offset, speaker, area and area.volume or 0.3) then
+            pcall(function() speaker:Stop() end)
+            dj.playing, dj.playedAt = dj.custom, os.clock()
+            return
+        end
+        index = fallbackIndex(dj.custom)
+    else
+        local M = package.loaded["coop.music"]
+        if type(M) == "table" and M.stop then M.stop("club") end
+    end
+    local wave = track(index)
+    if not wave then return end
     speaker:SetSound(wave)
     pcall(function() speaker:SetVolumeMultiplier(area and area.volume or 0.3) end)
     pcall(function() speaker:SetActive(true, false) end)
-    speaker:Play(math.max(0, offset or 0))
-    dj.playing, dj.playedAt = dj.index, os.clock()
+    local at = math.max(0, offset or 0)
+    pcall(function() if dj.custom and wave.Duration > 10 then at = at % wave.Duration end end)
+    speaker:Play(at)
+    dj.playing, dj.playedAt = dj.custom and "fallback" or dj.index, os.clock()
+end
+
+local function stopCustom()
+    local M = package.loaded["coop.music"]
+    if type(M) == "table" and M.stop then M.stop("club", 1) end
 end
 
 local function tellTrack(target)
-    local data = { i = dj.index, e = math.floor(os.clock() - dj.startedAt) }
+    local data = { i = dj.index, e = math.floor(os.clock() - dj.startedAt), c = dj.custom }
     if target then
         Net.send("dj", data, target)
     else
@@ -642,28 +702,54 @@ Core.every(1, function()
     local now = os.clock()
     pcall(quietArea)
     if World.role ~= "guest" and (not dj.index or now >= dj.startedAt + dj.length) then
-        local pick = CLUB_SET + math.random(#TRACKS - CLUB_SET)
-        if pick == dj.index then pick = CLUB_SET + (pick - CLUB_SET) % (#TRACKS - CLUB_SET) + 1 end
-        local wave = track(pick)
-        local length = 180
-        pcall(function() if wave and wave.Duration > 10 then length = wave.Duration end end)
-        dj.index, dj.startedAt, dj.length = pick, now, length - 1
+        -- the game's tracks and (the music addon) the host's own for the club, each
+        -- with the same chance
+        local games = #TRACKS - CLUB_SET
+        local M = musicModule()
+        local customs, only = {}, false
+        if M then customs, only = M.pool("PLAYLIST-BALLENA", true) end
+        -- (a folder of the club's own: only its songs)
+        if only and #customs > 0 then games = 0 end
+        local r = math.random(games + #customs)
+        if r > games then
+            local e = customs[r - games]
+            if e.id == dj.custom and #customs > 1 then e = customs[(r - games) % #customs + 1] end
+            dj.index, dj.custom, dj.startedAt, dj.length = 0, e.id, now, e.ms / 1000 - 1
+        else
+            local pick = CLUB_SET + r
+            if pick == dj.index then pick = CLUB_SET + (pick - CLUB_SET) % games + 1 end
+            local wave = track(pick)
+            local length = 180
+            pcall(function() if wave and wave.Duration > 10 then length = wave.Duration end end)
+            dj.index, dj.custom, dj.startedAt, dj.length = pick, nil, now, length - 1
+        end
         tellTrack()
     end
     if not dj.index then return end
     local inside = false
     pcall(function() inside = insideClub(World.player()) end)
+    local want = dj.custom or dj.index
+    -- (a guest playing the stand-in for a file it does not have yet keeps it until the file is here)
+    local waiting = dj.playing == "fallback" and not (musicModule() and musicModule().has(dj.custom))
     if not inside then
+        if dj.playing then stopCustom() end
         dj.playing = nil          -- coming back in, the track is picked up where it is by then
-    elseif dj.playing ~= dj.index then
+    elseif dj.playing ~= want and not waiting then
         local ok, e = pcall(playTrack, now - dj.startedAt)
         if not ok then log("Casino: the club's music: %s", tostring(e)) end
     elseif now - (dj.playedAt or 0) > 8 then
         -- (the game silences every music area now and then, a police chase for one: ours
         -- is started again where the track is by now)
         local silent = false
-        pcall(function() silent = clubSpeaker():IsPlaying() ~= true end)
-        if silent then pcall(playTrack, now - dj.startedAt) end
+        if dj.custom and dj.playing == dj.custom then
+            local M = package.loaded["coop.music"]
+            silent = not (type(M) == "table" and M.playing("club"))
+            -- (the game's speaker stays quiet under it)
+            pcall(function() if clubSpeaker():IsPlaying() then clubSpeaker():Stop() end end)
+        else
+            pcall(function() silent = clubSpeaker():IsPlaying() ~= true end)
+        end
+        if silent and now - dj.startedAt < dj.length - 2 then pcall(playTrack, now - dj.startedAt) end
     end
 end)
 Casino.musicArea = function() return area end
@@ -676,7 +762,18 @@ function Casino.pickTrack(i)
     local wave = track(i)
     local length = 180
     pcall(function() if wave and wave.Duration > 10 then length = wave.Duration end end)
-    dj.index, dj.startedAt, dj.length, dj.playing = i, os.clock(), length - 1, nil
+    dj.index, dj.custom, dj.startedAt, dj.length, dj.playing = i, nil, os.clock(), length - 1, nil
+    tellTrack()
+    return true
+end
+
+-- The same for a track of the host's music folder (the music addon).
+function Casino.pickCustom(id)
+    if World.role == "guest" then return false end
+    local M = musicModule()
+    local e = M and M.entry(id)
+    if not e or e.host or not M.has(id) then return false end
+    dj.index, dj.custom, dj.startedAt, dj.length, dj.playing = 0, id, os.clock(), e.ms / 1000 - 1, nil
     tellTrack()
     return true
 end
@@ -685,17 +782,19 @@ Casino.TRACKS, Casino.CLUB_SET = TRACKS, CLUB_SET
 Net.on("dj", function(sender, data)
     if not live() or World.role ~= "guest" or sender ~= (World.host or Net.S.owner) then return end
     local i, e = tonumber(data.i), tonumber(data.e) or 0
-    if not i or not TRACKS[i] then return end
+    local custom = type(data.c) == "string" and data.c or nil
+    if not i or (not custom and not TRACKS[i]) then return end
     -- (again the track we already play, and at the same place in it: nothing to do)
-    if math.floor(i) == dj.index and math.abs((os.clock() - e) - dj.startedAt) < 3 then return end
-    dj.index, dj.startedAt, dj.playing = math.floor(i), os.clock() - e, nil
+    if math.floor(i) == dj.index and custom == dj.custom and math.abs((os.clock() - e) - dj.startedAt) < 3 then return end
+    if dj.custom and dj.custom ~= custom then stopCustom() end
+    dj.index, dj.custom, dj.startedAt, dj.playing = math.floor(i), custom, os.clock() - e, nil
 end)
 
 World.listen("peer", function(id)
     if live() and World.role == "host" and dj.index then tellTrack(id) end
 end)
-World.listen("start", function() if live() then dj.index, dj.playing = nil, nil end end)
-World.listen("stop", function() if live() then dj.index, dj.playing = nil, nil end end)
+World.listen("start", function() if live() then stopCustom() dj.index, dj.custom, dj.playing = nil, nil, nil end end)
+World.listen("stop", function() if live() then stopCustom() dj.index, dj.custom, dj.playing = nil, nil, nil end end)
 
 local function letIn(context)
     if opening or not live() then return end
@@ -1606,6 +1705,7 @@ function Casino.enter()
         return false
     end
     scr.keepView = behind
+    standUp(player)
     pcall(function()
         setGhost(player, true)
         player.CharacterMovement:SetMovementMode(5, 0)       -- flying: nothing pulls the seated player down

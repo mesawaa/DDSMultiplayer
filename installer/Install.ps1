@@ -3,7 +3,7 @@
 # "downloaded from the internet" mark from the copied files, and checks the result.
 param([string]$Target = "", [switch]$DetectOnly)
 
-$version = "0.19.2"
+$version = "0.19.3"
 $exe = "DrugDealerSimulator-Win64-Shipping.exe"
 $rel = "steamapps\common\DrugDealerSimulator\DrugDealerSimulator\Binaries\Win64"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -107,7 +107,10 @@ $same = ((Resolve-Path -LiteralPath $here).Path.TrimEnd("\") -ieq (Resolve-Path 
 if (-not $same) {
     try {
         $old = Join-Path $win64 "ue4ss\Mods\DDSMultiplayer"
-        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction Stop }
+        # the old version goes, but for the Music folder: the player's own songs are in it
+        if (Test-Path -LiteralPath $old) {
+            Get-ChildItem -LiteralPath $old -Force | Where-Object { $_.Name -ine "Music" } | Remove-Item -Recurse -Force -ErrorAction Stop
+        }
         Copy-Item -LiteralPath (Join-Path $here "dwmapi.dll") -Destination $win64 -Force -ErrorAction Stop
         & robocopy (Join-Path $here "ue4ss") (Join-Path $win64 "ue4ss") /E /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "copying the ue4ss folder failed (robocopy code $LASTEXITCODE)" }

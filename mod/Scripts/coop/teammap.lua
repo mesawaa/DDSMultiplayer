@@ -20,6 +20,14 @@ local ORANGE = { R = 1.0, G = 0.36, B = 0.0, A = 1.0 }
 local recent = {}        -- player id -> the last places of their marker, newest last
 local painted = {}       -- player id -> the compass widget painted for them
 
+-- A player's colour on the compass: their own (coop/colours.lua) for whoever has the
+-- client marks switched on, otherwise the orange the map draws them in.
+local function colourOf(id)
+    local Colours = package.loaded["coop.colours"]
+    if Core.experimental("ClientMarks") and type(Colours) == "table" then return Colours.of(id), Colours.hexOf(id) end
+    return ORANGE, "orange"
+end
+
 local function note(id, p)
     local list = recent[id] or {}
     recent[id] = list
@@ -53,10 +61,11 @@ local function paintCompass()
             if ours then
                 local widget = hud.compasMarkersHolder:GetChildAt(i - 1)
                 if valid(widget) then
-                    local address = widget:GetAddress()
-                    if painted[id] ~= address then
-                        widget.Image_0:SetColorAndOpacity(ORANGE)
-                        painted[id] = address
+                    local colour, name = colourOf(id)
+                    local key = tostring(widget:GetAddress()) .. name
+                    if painted[id] ~= key then
+                        widget.Image_0:SetColorAndOpacity(colour)
+                        painted[id] = key
                     end
                     pcall(function() hud.compassLocations[i] = { X = now[1], Y = now[2], Z = now[3] } end)
                 end

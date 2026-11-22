@@ -118,6 +118,10 @@ end
 
 function Net.on(messageType, fn) handlers[messageType] = fn end
 function Net.onFile(tagPrefix, fn) fileHandlers[tagPrefix] = fn end
+-- Other events of the bridge (the music player's: coop/music.lua): fn(fields), fields[1]
+-- being the event's name.
+local eventHandlers = {}
+function Net.onEvent(kind, fn) eventHandlers[kind] = fn end
 -- kinds: "ready"(), "lobby"(kind), "left"(), "joined"(id, name), "gone"(id, name), "notice"(text)
 function Net.listen(kind, fn) table.insert(listeners[kind], fn) end
 
@@ -319,6 +323,9 @@ local function onEvent(line)
         Net.notify("Error: " .. (f[2] or "?"))
     elseif kind == "INFO" then
         Net.notify(f[2] or "")
+    elseif eventHandlers[kind] then
+        local ok, err = xpcall(eventHandlers[kind], debug.traceback, f)
+        if not ok then log("Event %s failed: %s", kind, tostring(err)) end
     end
 end
 

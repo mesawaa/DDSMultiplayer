@@ -9,6 +9,9 @@
 --   key    the name in config.lua's Experimental table
 --   name   the row's words on the page
 --   desc   grey words under them (optional)
+--   needs  a module of an optional addon: the row is shown only with the addon installed
+--   under  the key of another feature this one is a setting of: its row is shown only
+--          while that feature is on
 --   live   true: the switch counts at once (`Core.experimental` answers with the new
 --          value; `apply(on)` is called when the feature has one). Without it the switch
 --          counts after a restart, which is the safe choice for anything that sets itself
@@ -26,6 +29,23 @@ local log = Core.log
 local Experimental = {}
 
 Experimental.FEATURES = {
+    -- coop/orders.lua: the task list at the left as the open deliveries, sorted
+    { key = "DeliveryList", name = "DELIVERY LIST", desc = "The O key sorts the task list at the left: deliveries by drug or by area, the other tasks in a group of their own or with their area.",
+        live = true, apply = function()
+            local Orders = package.loaded["coop.orders"]
+            if type(Orders) == "table" and Orders.apply then Orders.apply() end
+        end },
+    -- coop/marks.lua, coop/colours.lua: every player sees the marks who has this on; the
+    -- host needs this version
+    { key = "ClientMarks", name = "MARK CLIENTS", desc = "Click the picture of a client or dealer on Shady Comm to mark the order as yours, in your colour (COLOUR, under your name there).",
+        live = true, apply = function()
+            local Marks = package.loaded["coop.marks"]
+            if type(Marks) == "table" and Marks.apply then Marks.apply() end
+        end },
+    -- (a setting of MARK CLIENTS: shown under it while that is on)
+    { key = "AutoMark", under = "ClientMarks", name = "AUTOMATICALLY MARK ACCEPTED DELIVERIES", desc = "An order you confirm on Shady Comm is marked as yours at once.", live = true },
+    -- coop/hud.lua, coop/look.lua: F next to the key of "Use the mod's places" (KEYBINDS)
+    { key = "UseWithF", name = "USE THE MOD'S PLACES WITH F", desc = "F, like the game's own places, wherever the game has nothing of its own on F.", live = true },
     -- coop/dance.lua: without it the club's dance floor stays black and white
     { key = "DanceFloor", name = "DANCE FLOOR LIGHTS", desc = "The club's dance floor lights up in colours while somebody stands on it.", live = true },
     -- coop/stack.lua (only the player who climbs needs it on)
@@ -101,10 +121,17 @@ function Experimental.page(ui)
     end
     local file = ui.file and ui.file() or nil
     local inFile = file and type(file.Experimental) == "table" and file.Experimental or nil
+    local function inFileOn(key)
+        if inFile then return inFile[key] == true end
+        return Core.experimental(key)
+    end
     for _, f in ipairs(Experimental.FEATURES) do
         local running = Core.experimental(f.key)
         local on = running
         if inFile then on = inFile[f.key] == true end
+        -- (a setting of another feature shows only while that feature is on)
+        if f.under and not inFileOn(f.under) then goto continue end
+        if f.needs and type(package.loaded[f.needs]) ~= "table" then goto continue end
         local sub, subColor = f.desc, nil
         if on ~= running then
             sub, subColor = (f.desc and (f.desc .. "  ") or "") .. "Changes after a restart.", ui.YELLOW
@@ -114,6 +141,7 @@ function Experimental.page(ui)
         end)
         scr.tint(b, on and Screen.GREEN or Screen.GREY)
         ui.row(inner, f.name, sub, { b.widget }, subColor)
+        ::continue::
     end
 end
 

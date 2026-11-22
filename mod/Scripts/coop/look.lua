@@ -2059,14 +2059,27 @@ Core.Hooks.add(WARDROBE .. ":endCopAlert", function()
 end)
 Clerk.onShow = function() Look.openShop(Clerk) end
 
+local function useModPlace()
+    local ok, e = xpcall(function()
+        local t = Look.takeover
+        if t and (t.isOpen() or (not scr and t.near())) then t.toggle() else Look.toggle() end
+    end, debug.traceback)
+    if not ok then log("Wardrobe: %s", tostring(e)) end
+end
+
 if Core.bindKey then
-    Core.bindKey(Core.config.WardrobeKey or "U", function()
-        local ok, e = xpcall(function()
+    Core.bindKey(Core.config.WardrobeKey or "U", useModPlace)
+    -- EXPERIMENTAL UseWithF: F does the same where the prompt says F (no hint of the game's
+    -- own is up, so the game does nothing on it), and closes what it opened.
+    if tostring(Core.config.WardrobeKey or "U"):upper() ~= Hud.USE_KEY then
+        Core.bindKey(Hud.USE_KEY, function()
+            if not Core.experimental("UseWithF") or Hud.gameHintShown() then return end
             local t = Look.takeover
-            if t and (t.isOpen() or (not scr and t.near())) then t.toggle() else Look.toggle() end
-        end, debug.traceback)
-        if not ok then log("Wardrobe: %s", tostring(e)) end
-    end)
+            local open = (scr and (Look.page == "shop" or Look.page == "wardrobe" or Look.page == "barber"))
+                or (t and t.isOpen())
+            if open or Hud.promptKey() == Hud.USE_KEY then useModPlace() end
+        end)
+    end
 end
 
 ---------------------------------------------------------------- the player's own hands

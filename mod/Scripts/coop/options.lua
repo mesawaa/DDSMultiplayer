@@ -21,6 +21,7 @@
 local Core = require("core")
 local World = require("coop.world")
 local Screen = require("coop.screen")
+local Keys = require("coop.keys")
 local Hud = require("coop.hud")
 local Story = require("coop.story")
 local Sync = require("coop.sync")
@@ -219,7 +220,7 @@ local CONFIG = Core.MOD_DIR .. "/Scripts/config.lua"
 
 -- Every setting the screen shows. `sync` = a switch of the Sync table (after a restart);
 -- `zero` = what 0 means; `desc` = grey words under the name; `warn` = yellow words on a
--- group's title line, after its grey words.
+-- group's title line, after its grey words; `choices` = the words a setting goes through.
 local SETTINGS = {
     -- the storyline switch is near the top: switching it off is how quests are shared
     { group = "STORY", note = "after a restart; every player the same" },
@@ -258,6 +259,14 @@ local SETTINGS = {
     { key = "Money", sync = true, name = "Bank account, messages, contacts" },
     { key = "Orders", sync = true, name = "Orders, tasks, gang business" },
     { key = "Managers", sync = true, name = "Exposure, reputation, and sale areas" },
+    { group = "TAGGING" },
+    { key = "TagSprays1x1", name = "Sprays for a 1x1 tag", min = 1, max = 12, step = 1 },
+    { key = "TagSprays2x1", name = "Sprays for a 2x1 tag", min = 1, max = 12, step = 1 },
+    { key = "TagSprays3x2", name = "Sprays for a 3x2 tag", min = 1, max = 12, step = 1 },
+    { key = "TagRespect1x1", name = "Respect of a 1x1 tag, times", min = 0.25, max = 10, step = 0.25 },
+    { key = "TagRespect2x1", name = "Respect of a 2x1 tag, times", min = 0.25, max = 10, step = 0.25 },
+    { key = "TagRespect3x2", name = "Respect of a 3x2 tag, times", min = 0.25, max = 10, step = 0.25 },
+    { key = "TagLifetimeMinutes", name = "A tag lasts, minutes", min = 5, max = 240, step = 5 },
 }
 
 local fileValues = nil   -- what config.lua says right now (a table), read when the page is drawn
@@ -279,6 +288,7 @@ end
 
 local function literal(v)
     if type(v) == "boolean" then return v and "true" or "false" end
+    if type(v) == "string" then return '"' .. v:gsub('[\\"]', "") .. '"' end
     if math.type(v) == "integer" or v == math.floor(v) then return string.format("%d", math.floor(v)) end
     return (string.format("%.2f", v):gsub("0+$", ""):gsub("%.$", ""))
 end
@@ -397,7 +407,14 @@ end
 
 local render
 
+-- (the music addon's page lets go of its widgets: coop/music.lua)
+local function leaveMusic()
+    local M = package.loaded["coop.music"]
+    if type(M) == "table" and M.leavePage then pcall(M.leavePage) end
+end
+
 local function close()
+    leaveMusic()
     local s = scr
     scr, drawn = nil, {}
     if s and s.open then pcall(s.close) end
@@ -536,7 +553,26 @@ local function settingsPage(inner)
             if s.sync and v ~= Core.enabled(s.key) then
                 sub, subColor = (s.desc and (s.desc .. "  ") or "") .. "Changes after a restart.", YELLOW
             end
-            if s.min then
+            if s.choices then
+                v = tostring(v or ""):upper()
+                local at = 1
+                for i, c in ipairs(s.choices) do if c == v then at = i end end
+                local function step(dir)
+                    return function()
+                        set(s, s.choices[(at - 1 + dir) % #s.choices + 1])
+                        render()
+                    end
+                end
+                local minus = scr.button("-", nil, step(-1))
+                local plus = scr.button("+", nil, step(1))
+                local value = scr.text(s.choices[at], "button", 18)
+                local vb = scr.sized(nil, 92)
+                local center = scr.new("HorizontalBox")
+                center:AddChildToHorizontalBox(value):SetHorizontalAlignment(2)
+                vb:AddChild(center)
+                pcall(function() center.Slot:SetHorizontalAlignment(2) end)
+                controls = { minus.widget, vb, plus.widget }
+            elseif s.min then
                 v = tonumber(v) or s.min
                 local function nudge(dir)
                     return function()
@@ -585,8 +621,172 @@ local function experimentalPage(inner)
     })
 end
 
+---------------------------------------------------------------- KEYBINDS
+
+-- Every key of the mod (config.lua). A key is bound when the game starts, so a change counts
+-- after a restart.
+local BINDS = {
+    { key = "HostInviteKey", name = "Host a lobby and invite", default = "F6" },
+    { key = "LeaveKey", name = "Leave the lobby", default = "F7" },
+    { key = "StatusKey", name = "Lobby status", default = "F8" },
+    { key = "ModOptionsKey", name = "Mod options", default = "F9" },
+    { key = "ChatKey", name = "Chat", default = "/" },
+    { key = "EmoteKey", name = "Emote wheel", default = "V" },
+    { key = "StrutKey", name = "Strut walk", default = "CAPS_LOCK" },
+    { key = "ThirdPersonKey", name = "Third-person view", default = "P" },
+    { key = "WardrobeKey", name = "Use the mod's places", desc = "Clothes shops, the barber, the card room, the slot machines", default = "U" },
+    { key = "TagNextKey", name = "Next tag", desc = "While the spray marker is out", default = "R" },
+    { key = "TagPaintKey", name = "Coats of paint", desc = "While the spray marker is out", default = "C" },
+    { key = "DeliveryListKey", name = "Sort the task list", desc = "Experimental DELIVERY LIST. Held: hide or show what others have marked", default = "O" },
+}
+
+-- What the screen is doing about a key: { key (of config.lua), phase = "listen" | "confirm",
+-- held (keys that were down when listening began), picked, clash }.
+local binding = nil
+
+local function bindValue(b)
+    local v = fileValues and fileValues[b.key]
+    if v == nil then v = Core.config[b.key] end
+    if v == nil then v = b.default end
+    return tostring(v)
+end
+
+-- What the game itself has on its keys: engine key name (upper case) -> what for.
+local function gameKeys()
+    local out = {}
+    for _, k in ipairs({ "Y", "H", "L", "F10", "ESCAPE" }) do out[k] = "the game" end
+    pcall(function()
+        local is = StaticFindObject("/Script/Engine.Default__InputSettings")
+        is.ActionMappings:ForEach(function(_, v)
+            local m = v:get()
+            out[m.Key.KeyName:ToString():upper()] = "the game (" .. m.ActionName:ToString() .. ")"
+        end)
+        is.AxisMappings:ForEach(function(_, v)
+            local m = v:get()
+            out[m.Key.KeyName:ToString():upper()] = "the game (" .. m.AxisName:ToString() .. ")"
+        end)
+    end)
+    return out
+end
+
+-- Who else has that key: another binding of the mod, or the game. nil: nobody.
+local function clashOf(configKey, name)
+    local ue = Keys.ue(name):upper()
+    for _, b in ipairs(BINDS) do
+        if b.key ~= configKey and Keys.ue(bindValue(b)):upper() == ue then return b.name end
+    end
+    return gameKeys()[ue]
+end
+
+local function endBinding()
+    if binding and binding.phase == "listen" then Core.typing = nil end
+    binding = nil
+end
+
+local function writeBind(configKey, name)
+    if not writeValue(configKey, false, name) then
+        pcall(Hud.toast, "config.lua could not be written", 4)
+        return
+    end
+    fileValues = evaluate(readFile() or "") or fileValues
+    log("Options: %s = %s (after a restart)", configKey, name)
+end
+
+local function keysPage(inner)
+    fileValues = evaluate(readFile() or "") or fileValues
+    for _, b in ipairs(BINDS) do
+        local value = bindValue(b)
+        local sub, subColor = b.desc, nil
+        local controls = {}
+        local mine = binding and binding.key == b.key and binding or nil
+        if mine and mine.phase == "confirm" then
+            sub, subColor = string.format("%s is already used by: %s.", Keys.label(mine.picked), mine.clash), YELLOW
+            local yes = scr.button("CONFIRM", nil, function()
+                local picked = mine.picked
+                endBinding()
+                writeBind(b.key, picked)
+                render()
+            end)
+            scr.tint(yes, Screen.GREEN)
+            local no = scr.button("BACK", nil, function()
+                endBinding()
+                render()
+            end)
+            controls = { yes.widget, no.widget }
+        elseif mine then
+            local stop = scr.button("PRESS A KEY", nil, function()
+                endBinding()
+                render()
+            end)
+            scr.tint(stop, YELLOW)
+            controls = { stop.widget }
+        else
+            if Keys.ue(value):upper() ~= Keys.ue(tostring(Core.config[b.key] or b.default)):upper() then
+                sub, subColor = (b.desc and (b.desc .. "  ") or "") .. "Changes after a restart.", YELLOW
+            end
+            local change = scr.button(Keys.label(value), nil, function()
+                endBinding()
+                local held = {}
+                pcall(function() held = Keys.down(World.player():GetController()) end)
+                binding = { key = b.key, phase = "listen", held = held }
+                Core.typing = true
+                render()
+            end)
+            controls = { change.widget }
+        end
+        row(inner, b.name, sub, controls, subColor)
+    end
+end
+
+-- While a key is waited for: the first key of the list that goes down.
+Core.onTick(function()
+    if not live() or not binding or binding.phase ~= "listen" then return end
+    if not scr or Options.tab ~= "keys" then
+        endBinding()
+        return
+    end
+    local player = World.player()
+    local pc = player and player:GetController()
+    if not valid(pc) then return end
+    local now = Options.testDown or Keys.down(pc)
+    local picked = nil
+    for _, k in ipairs(Keys.LIST) do
+        if now[k.name] and not binding.held[k.name] then picked = picked or k.name end
+    end
+    -- (a key that was held when the waiting began counts once it has been let go)
+    for name in pairs(binding.held) do if not now[name] then binding.held[name] = nil end end
+    if not picked then return end
+    local key = binding.key
+    Core.typing = nil
+    local clash = clashOf(key, picked)
+    if clash then
+        binding = { key = key, phase = "confirm", picked = picked, clash = clash }
+    else
+        binding = nil
+        writeBind(key, picked)
+    end
+    render()
+end)
+
 local TABS = { { "settings", "SETTINGS" }, { "repair", "REPAIR" }, { "quests", "QUESTS" },
-    { "experimental", "EXPERIMENTAL" } }
+    { "experimental", "EXPERIMENTAL" }, { "keys", "KEYBINDS" } }
+
+-- (MUSIC while the music addon is installed: coop/music.lua and its DLL)
+local function musicModule()
+    local M = package.loaded["coop.music"]
+    if type(M) == "table" and M.page and M.enabled and M.enabled() then return M end
+    return nil
+end
+
+local function tabs()
+    if not musicModule() then return TABS end
+    local out = {}
+    for _, t in ipairs(TABS) do
+        if t[1] == "keys" then out[#out + 1] = { "music", "MUSIC" } end
+        out[#out + 1] = t
+    end
+    return out
+end
 
 render = function()
     if not scr or not scr.open then return end
@@ -618,9 +818,12 @@ render = function()
     put(column, line, 14):SetHorizontalAlignment(1)
 
     local bar = scr.new("HorizontalBox")
-    for i, t in ipairs(TABS) do
+    if Options.tab == "music" and not musicModule() then Options.tab = "experimental" end
+    if Options.tab ~= "music" and musicModule() then musicModule().leavePage() end
+    for i, t in ipairs(tabs()) do
         local b = scr.bigButton(t[2], 1.3, function()
             if Options.tab ~= t[1] then
+                endBinding()
                 Options.tab = t[1]
                 render()
             end
@@ -652,6 +855,18 @@ render = function()
         if Options.tab == "quests" then reloadPage(inner)
         elseif Options.tab == "repair" then repairPage(inner)
         elseif Options.tab == "experimental" then experimentalPage(inner)
+        elseif Options.tab == "keys" then keysPage(inner)
+        elseif Options.tab == "music" then
+            musicModule().page({
+                scr = scr, inner = inner, row = row, put = put, emptyLine = emptyLine, group = group, YELLOW = YELLOW,
+                render = function() render() end,
+                -- (a row's panel around any widget)
+                panel = function(child)
+                    local box = scr.box(ROW_BG, child)
+                    box:SetPadding({ Left = 18, Top = 10, Right = 18 - BUTTON_INSET, Bottom = 10 })
+                    put(inner, box, 6)
+                end,
+            })
         else settingsPage(inner) end
     end, debug.traceback)
     if not ok then log("Options: the %s page: %s", Options.tab, tostring(e)) end
@@ -686,7 +901,9 @@ function Options.open(tab)
     if not s then return false end
     scr, drawn = s, {}
     s.onClose = function()
+        leaveMusic()
         if scr == s then scr, drawn = nil, {} end
+        endBinding()
     end
     s.fill(s.box({ R = 0, G = 0, B = 0, A = 0.9 }), 0)
     render()
@@ -696,6 +913,8 @@ end
 function Options.close() close() end
 Options.unstuck = unstuck
 function Options.isOpen() return scr ~= nil end
+function Options.binding() return binding end
+Options.BINDS = BINDS
 Options.writeValue, Options.SETTINGS = writeValue, SETTINGS
 
 Options.render = function() if scr then render() end end

@@ -142,7 +142,15 @@ function Emote.choose(i)
     closeWheel()
     local e = i and Avatar.EMOTES[i]
     if e and e.strut then Emote.toggleStrut()
-    elseif e then Avatar.setEmote(i)
+    elseif e then
+        -- (a seated pose is taken from standing: out of the game's crouch first)
+        if e.back then
+            pcall(function()
+                local p = World.player()
+                if p and p.IsCrouching == true then p:breakCrouch() end
+            end)
+        end
+        Avatar.setEmote(i)
     elseif playing then Avatar.setEmote(0) end
 end
 

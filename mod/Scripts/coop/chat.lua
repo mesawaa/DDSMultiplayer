@@ -18,6 +18,7 @@
 local Core = require("core")
 local Net = require("net")
 local World = require("coop.world")
+local Colours = require("coop.colours")
 
 local log, valid = Core.log, Core.valid
 local config = Core.config
@@ -44,17 +45,7 @@ Chat.KEEP = 60            -- messages remembered
 
 local WHITE = { R = 1, G = 1, B = 1, A = 1 }
 local RED = { R = 0.85, G = 0.08, B = 0.08, A = 1 }
--- one colour per player, by their place in the lobby's list
-local NAMES = {
-    { R = 1.0, G = 0.55, B = 0.10, A = 1 },
-    { R = 0.30, G = 0.75, B = 1.0, A = 1 },
-    { R = 0.45, G = 0.90, B = 0.35, A = 1 },
-    { R = 1.0, G = 0.45, B = 0.75, A = 1 },
-    { R = 1.0, G = 0.90, B = 0.30, A = 1 },
-    { R = 0.70, G = 0.55, B = 1.0, A = 1 },
-}
-
-local lines = {}          -- { name, text, color, at }, oldest first
+local lines = {}          -- { name, text, color, at, id }, oldest first
 local changed = true      -- the rows have to be filled again
 local ui = nil            -- widgets of the world being played
 local failedFor = nil
@@ -78,21 +69,16 @@ local function clean(s)
     return s
 end
 
-local function colourOf(id)
-    local ids = {}
-    for member in pairs(Net.S.members) do ids[#ids + 1] = member end
-    table.sort(ids)
-    for i, member in ipairs(ids) do
-        if member == id then return NAMES[(i - 1) % #NAMES + 1] end
-    end
-    return NAMES[1]
-end
+-- A player's colour: their own choice, or one of six by their place in the lobby's list
+-- (coop/colours.lua).
+local function colourOf(id) return Colours.of(id) end
 
--- Puts a message on the screen (and into what is remembered).
-function Chat.add(name, text, color)
+-- Puts a message on the screen (and into what is remembered). `id`: the player who wrote
+-- it (the name follows that player's colour when they choose another).
+function Chat.add(name, text, color, id)
     text = clean(text)
     if text == "" then return end
-    lines[#lines + 1] = { name = tostring(name or "?"), text = text, color = color or NAMES[1], at = os.clock() }
+    lines[#lines + 1] = { name = tostring(name or "?"), text = text, color = color or colourOf(id), at = os.clock(), id = id ~= nil and tostring(id) or nil }
     while #lines > Chat.KEEP do table.remove(lines, 1) end
     changed = true
 end
@@ -105,14 +91,27 @@ function Chat.say(text)
     if now - lastSent < 0.3 then return false end
     lastSent = now
     if Net.inLobby() then Net.send("chat", { m = text }) end
-    Chat.add(Net.S.myName, text, colourOf(Net.S.me))
+    Chat.add(Net.S.myName, text, colourOf(Net.S.me), Net.S.me or "me")
     return true
 end
 
 Net.on("chat", function(sender, data, name)
     if type(data.m) ~= "string" then return end
     log("Chat: %s: %s", tostring(Net.S.members[sender] or name), clean(data.m))
-    Chat.add(Net.S.members[sender] or name, data.m, colourOf(sender))
+    Chat.add(Net.S.members[sender] or name, data.m, colourOf(sender), sender)
+end)
+
+-- A player has chosen another colour: what they wrote takes it.
+Colours.onChange(function(id)
+    if not live() then return end
+    local c = Colours.of(id)
+    for i, line in ipairs(lines) do
+        if line.id == id then
+            -- (another table: the rows on screen are filled again where the line is another)
+            lines[i] = { name = line.name, text = line.text, color = c, at = line.at, id = line.id }
+            changed = true
+        end
+    end
 end)
 
 ---------------------------------------------------------------- widgets

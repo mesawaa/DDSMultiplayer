@@ -1,0 +1,21 @@
+DDS1 Co-op - YOUR OWN MUSIC addon (optional)
+
+Needs DDS1 Co-op 0.19.3 or later installed first.
+
+INSTALL
+Extract this zip into the game's folder
+  ...\DrugDealerSimulator\DrugDealerSimulator\Binaries\Win64
+(the same folder the main mod was extracted into). It adds:
+  ue4ss\Mods\DDSMultiplayer\Scripts\coop\music.lua
+  ue4ss\Mods\DDSMultiplayer\bin\ddsmp_audio.dll   (plays the music files)
+  ue4ss\Mods\DDSMultiplayer\Music\README.txt     (the folder for your songs)
+It replaces none of the main mod's files.
+
+Then put mp3 files in ue4ss\Mods\DDSMultiplayer\Music and start the game: the
+addon is on as soon as it is installed. Music\README.txt says the rest.
+
+In co-op only the host needs songs in the folder; every player needs the addon
+installed to hear them.
+
+UNINSTALL
+Delete Scripts\coop\music.lua and bin\ddsmp_audio.dll.

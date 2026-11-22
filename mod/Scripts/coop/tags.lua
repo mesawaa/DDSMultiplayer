@@ -17,8 +17,10 @@
 -- goes to the next one while the spray marker is out); a wall keeps the tag it was sprayed
 -- with. A tag is square, twice as wide as high (two squares side by side: it takes two
 -- sprays of the can and twice the time), or large: three squares wide and two high (six
--- sprays; the time is that of three). A wall can be sprayed with one, two or three
--- times the paint (another key) and then lasts that many times as long. Besides the
+-- sprays; the time is that of three); a wide tag gives its area one and a half times the
+-- respect of a square one, a large one three times. A wall can be sprayed with one, two or three
+-- times the paint (another key) and then lasts that many times as long and holds its
+-- area's respect that many times as high (a larger tag a little higher still). Besides the
 -- twelve paints a stroke can have any colour, given as RRGGBB.
 
 local Core = require("core")
@@ -27,6 +29,7 @@ local json = require("json")
 local World = require("coop.world")
 local Screen = require("coop.screen")
 local Look = require("coop.look")
+local Repl = require("coop.repl")
 
 local log, valid = Core.log, Core.valid
 
@@ -38,8 +41,14 @@ local Tags = { stats = { sprayed = 0, mirrored = 0, dressed = 0, rendered = 0, s
 
 local SIZE = 512                 -- a square drawing is SIZE x SIZE; the other shapes are made of such squares
 -- The shapes of a tag, by the letter a drawing and a wall are written with: squares across
--- and down, and how many times the points of a square one may have.
-local SHAPES = { s = { cols = 1, rows = 1, points = 1 }, w = { cols = 2, rows = 1, points = 2 }, b = { cols = 3, rows = 2, points = 4 } }
+-- and down, how many times the points of a square one may have, how many times the
+-- respect a square tag gives its area, and what its size adds to the respect its wall
+-- holds the area at (in walls: a wall holds as much as it has coats of paint, plus this).
+local SHAPES = {
+    s = { cols = 1, rows = 1, points = 1, respect = 1, hold = 0 },
+    w = { cols = 2, rows = 1, points = 2, respect = 1.5, hold = 0.25 },
+    b = { cols = 3, rows = 2, points = 4, respect = 3, hold = 0.5 },
+}
 local SHAPE_ORDER = { "s", "w", "b" }
 local SHAPE_NAMES = { "1x1", "2x1", "3x2" }
 local MAX_HOLD = 3               -- times the usual time a spray takes at most, however many squares
@@ -56,6 +65,7 @@ local SPRAY_ITEM = "ITEM-SPRAYPAINT"
 local MARK = "/Game/TerritorySpraying/wallSprayMarking.wallSprayMarking_C"
 local GIZMO = "/Game/TerritorySpraying/sprayPlacementGizmo.sprayPlacementGizmo_C"
 local AREA = "/Game/TerritorySpraying/sprayAreaGizmo.sprayAreaGizmo_C"
+local AREAS = "/Game/TerritorySpraying/saleAreaManager.saleAreaManager_C"
 local CHOICE = "/Game/GUI/symbolChoiceWidget.symbolChoiceWidget_C"
 local CHOICE_USE = CHOICE .. ":BndEvt__btnUseSelected_K2Node_ComponentBoundEvent_2_OnButtonClickedEvent__DelegateSignature"
 local CHOICE_CLOSE = "BndEvt__btnClose_K2Node_ComponentBoundEvent_9_OnButtonClickedEvent__DelegateSignature"
@@ -128,6 +138,30 @@ local function kindOf(text)
 end
 Tags.kindOf = kindOf
 local function squares(kind) local sh = SHAPES[kind] or SHAPES.s return sh.cols * sh.rows end
+
+-- What the TAGGING settings of MOD OPTIONS change (config.lua): the sprays a tag of each
+-- shape takes, the respect it gives (times the game's), and how long a tag lasts. The time
+-- a spray is held for is not among them. (Kept on the module's table: this file has no
+-- room left for more local names.)
+Tags.SHAPE_KEY = { s = "1x1", w = "2x1", b = "3x2" }
+function Tags.setting(name, least, most, fallback)
+    local v = tonumber(Core.config[name])
+    if not v then return fallback end
+    return math.max(least, math.min(most, v))
+end
+function Tags.spraysFor(kind)
+    kind = SHAPES[kind] and kind or "s"
+    return math.floor(Tags.setting("TagSprays" .. Tags.SHAPE_KEY[kind], 1, 24, squares(kind)) + 0.5)
+end
+function Tags.respectFor(kind)
+    kind = SHAPES[kind] and kind or "s"
+    return Tags.setting("TagRespect" .. Tags.SHAPE_KEY[kind], 0, 20, SHAPES[kind].respect)
+end
+-- Seconds one coat lasts; nil: as long as the game makes it.
+function Tags.lifeFor()
+    local minutes = tonumber(Core.config.TagLifetimeMinutes)
+    return minutes and minutes > 0 and math.max(1, math.min(600, minutes)) * 60 or nil
+end
 
 local function encode(strokes, kind)
     kind = SHAPES[kind] and kind or "s"
@@ -241,8 +275,9 @@ end
 local my = { use = false, a = 1, g = { "", "", "" }, w = 22, c = 3, own = {} }
 -- The world's walls (this game's own worlds): who sprayed which wall, when it was not the
 -- world's owner; with which of the sprayer's tags and whether as a wide one (how: "2w" is
--- tag 2, wide; "0" the game's symbol); and the other players' tags as last heard.
-local kept = { owners = {}, how = {}, tags = {}, seen = {} }
+-- tag 2, wide; "0" the game's symbol); with how many coats of paint, when more than one;
+-- and the other players' tags as last heard.
+local kept = { owners = {}, how = {}, tags = {}, seen = {}, coats = {} }
 local loaded = false
 local keptDirty = false
 
@@ -317,6 +352,12 @@ local function load()
         if type(data.tags) == "table" then
             for k, v in pairs(data.tags) do
                 if type(k) == "string" then kept.tags[k] = cleanBook(v) end
+            end
+        end
+        if type(data.coats) == "table" then
+            for k, v in pairs(data.coats) do
+                local c = math.tointeger(tonumber(v) or 0) or 0
+                if type(k) == "string" and c >= 2 and c <= MAX_PAINT then kept.coats[k] = c end
             end
         end
         if type(data.seen) == "table" then
@@ -642,7 +683,7 @@ local function dress(marking, address, early)
     shape(marking, wallKind, tag and tag.d and kindOf(tag.d) or "s")
     if early == nil then early = (w.dressed[address] or ""):sub(-1) == "e" end
     w.dressed[address] = pid .. "#" .. (version[pid] or 0) .. (early and "e" or "")
-    if ownWorld() and (owners()[key] or hows()[key]) then kept.seen[key] = os.time() end
+    if ownWorld() and (owners()[key] or hows()[key] or kept.coats[key]) then kept.seen[key] = os.time() end
 end
 
 -- The game sets its own symbol when a wall appears and a second later; ours goes back on
@@ -839,6 +880,16 @@ local function mirror(data, pid)
     local kind = SHAPES[data.k] and data.k ~= "s" and data.k or (data.w == 1 and "w" or "")
     hows()[key] = (n >= 0 and n <= SLOTS) and (n .. kind) or nil
     if ownWorld() then
+        -- (a game that does not say how many coats: by how long the wall is to last)
+        local coats = math.tointeger(tonumber(data.n) or 0) or 0
+        if coats < 1 then
+            local usual = 900
+            pcall(function() usual = StaticFindObject("/Game/TerritorySpraying/wallSprayMarking.Default__wallSprayMarking_C").Lifetime end)
+            usual = Tags.lifeFor() or usual
+            coats = math.floor((tonumber(data.l) or 0) / math.max(1, usual) + 0.5)
+        end
+        coats = math.max(1, math.min(MAX_PAINT, coats))
+        kept.coats[key] = coats > 1 and coats or nil
         kept.seen[key] = os.time()
         keptDirty = true
     end
@@ -847,20 +898,77 @@ local function mirror(data, pid)
 end
 
 -- What spraying does to the area (the game does it in the sprayer's own game, where the
--- shared numbers are the host's): done once more in the host's game for a guest's wall.
-local function areaEffect(marking)
+-- shared numbers are the host's): done once more in the host's game for a guest's wall,
+-- with the respect of the tag's shape. As in the game, every area the wall's small sphere
+-- reaches into gets it.
+local function areaEffect(marking, kind)
     pcall(function()
-        local effect = marking.defExposureEffect
+        local effect = marking.defExposureEffect * Tags.respectFor(kind)
         local hour = Core.find("dayTimeControler_C").curHour
         if hour >= 22 or hour <= 6 then effect = effect * 1.2 end
+        local sphere = marking.sphereSmall
         for _, g in ipairs(Core.actors(AREA) or {}) do
-            if marking:IsOverlappingActor(g) and valid(g.saleAreaManager) then
+            if sphere:IsOverlappingActor(g) and valid(g.saleAreaManager) then
                 g.saleAreaManager:addAreaExposure(g.saleAreaAffected:ToString(), effect)
-                return
             end
         end
     end)
 end
+
+-- The respect a wall holds its area at. The game holds an area's respect at one step for
+-- every wall there (it counts them about once a second and sets the area's lowest respect
+-- anew). A wall with more coats holds as many steps as it has coats, a wide or a large
+-- tag a part of a step more: what that comes to above the game's own count is added
+-- right after the game has set its number. In the game whose numbers are shared only.
+local held = {}         -- area -> steps above the game's count
+Core.every(3, function()
+    if not live() then return end
+    local extra = {}
+    if Core.enabled("Tags") and ownWorld() and loaded then
+        local areas = nil
+        for _, m in ipairs(Core.actors(MARK) or {}) do
+            pcall(function()
+                local key = keyOf(m)
+                local _, kind = howOf(key)
+                local more = (kept.coats[key] or 1) - 1 + SHAPES[kind].hold
+                if more <= 0 then return end
+                areas = areas or Core.actors(AREA) or {}
+                local done = {}
+                for _, g in ipairs(areas) do
+                    if m:IsOverlappingActor(g) then
+                        local name = g.saleAreaAffected:ToString()
+                        if not done[name] then
+                            done[name] = true
+                            extra[name] = (extra[name] or 0) + more
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    held = extra
+end)
+
+Core.Hooks.add(AREAS .. ":updateExpoStatus", function(ctx)
+    if not live() or next(held) == nil or not Core.enabled("Tags") or not ownWorld() then return end
+    pcall(function()
+        local sam = ctx:get()
+        if not valid(sam) then return end
+        local step = sam.exposureClampPerSymbol
+        local floors = Repl.splitArray(Repl.export(sam, { "saleAreaClampExposure" }).saleAreaClampExposure)
+        local changed = false
+        for i = 1, sam.saleAreaStrings:GetArrayNum() do
+            local more = held[sam.saleAreaStrings[i]:ToString()]
+            local now = tonumber(floors[i])
+            if more and now then
+                floors[i] = string.format("%.6f", now + more * step)
+                changed = true
+            end
+        end
+        if changed then Repl.import(sam, { saleAreaClampExposure = Repl.joinArray(floors) }) end
+    end)
+end)
+Tags.held = function() return held end
 
 Net.on("tagwall", function(sender, data)
     if not live() or not Core.enabled("Tags") or not World.isPeer(sender) then return end
@@ -874,10 +982,13 @@ Net.on("tagwall", function(sender, data)
         return
     end
     if World.role == "host" then
-        if m then Core.after(0.6, function() if Core.alive(m) then areaEffect(m) end end) end
+        if m then
+            local kind = SHAPES[data.k] and data.k or (data.w == 1 and "w" or "s")
+            Core.after(0.6, function() if Core.alive(m) then areaEffect(m, kind) end end)
+        end
         for id in pairs(World.inWorld) do
             if id ~= sender then
-                Net.send("tagwall", { p = pid, x = data.x, y = data.y, z = data.z, a = data.a, b = data.b, c = data.c, l = data.l, g = data.g, w = data.w, k = data.k }, id)
+                Net.send("tagwall", { p = pid, x = data.x, y = data.y, z = data.z, a = data.a, b = data.b, c = data.c, l = data.l, g = data.g, w = data.w, k = data.k, n = data.n }, id)
             end
         end
     end
@@ -905,7 +1016,7 @@ end)
 -- marker gets the tag's shape: the game's own four checks of the wall then stand at the
 -- tag's corners) and how many times the paint. A tag takes a spray of the can for each of
 -- its squares; twice the paint is twice that again and makes the wall last twice as long.
-local spray = { want = 1, sections = 1, kind = "s", used = "s", uses = 0, at = 0, on = false }
+local spray = { want = 1, sections = 1, cost = 1, kind = "s", used = "s", uses = 0, at = 0, on = false }
 
 -- The game looks at the wall behind the marker's four corners only. A tag of more than one
 -- square can have a window or a door between them: the wall is looked at every half
@@ -1042,13 +1153,13 @@ local function fillRow(r)
         end
         texts[#texts + 1] = { keyName("TagNextKey"), label }
     end
-    local level = paintLevel(spray.uses, spray.sections)
+    local level = paintLevel(spray.uses, spray.cost)
     if spray.blocked then
         texts = { { "", "no room here for a tag this size" } }
     elseif level == 0 then
-        texts[#texts + 1] = { "", string.format("this tag needs %d sprays", spray.sections) }
+        texts[#texts + 1] = { "", string.format("this tag needs %d sprays", spray.cost) }
     else
-        local cost = level * spray.sections
+        local cost = level * spray.cost
         texts[#texts + 1] = { keyName("TagPaintKey"), string.format("lasts %dx (%d spray%s)", level, cost, cost == 1 and "" or "s") }
     end
     for i, line in ipairs(r.lines) do
@@ -1073,7 +1184,7 @@ Core.onTick(function()
     local player = World.player()
     local g = player and Core.enabled("Tags") and marker(player) or nil
     if not g then
-        spray.on, spray.sections, spray.used, spray.blocked, row = false, 1, "s", false, nil
+        spray.on, spray.sections, spray.cost, spray.used, spray.blocked, row = false, 1, 1, "s", false, nil
         return
     end
     if row and row.gizmo ~= g:GetAddress() then row = nil end
@@ -1094,6 +1205,7 @@ Core.onTick(function()
         local sh = SHAPES[kind]
         sections = sh.cols * sh.rows
         spray.sections, spray.used = sections, kind
+        spray.cost = claimed and 1 or Tags.spraysFor(kind)
         local a = g:GetActorScale3D()
         if math.abs(a.Y - sh.cols) > 0.01 or math.abs(a.Z - sh.rows) > 0.01 then g:SetActorScale3D({ X = 1, Y = sh.cols, Z = sh.rows }) end
         if sections == 1 then
@@ -1164,7 +1276,7 @@ function Tags.morePaint()
     local player = sprayPlayer()
     if not player then return false end
     spray.uses = sprayUses(player)
-    local most = math.min(MAX_PAINT, spray.uses // math.max(1, spray.sections))
+    local most = math.min(MAX_PAINT, spray.uses // math.max(1, spray.cost))
     local level = math.min(spray.want, most)
     spray.want = level + 1 > most and 1 or level + 1
     return true
@@ -1179,7 +1291,7 @@ end
 
 -- The key was pressed with less paint in the cans than the tag takes: nothing is sprayed.
 Core.Hooks.add(GIZMO .. ":ActionPress", function(ctx)
-    if not live() or not Core.enabled("Tags") or not spray.on or spray.sections < 2 then return end
+    if not live() or not Core.enabled("Tags") or not spray.on or (spray.sections < 2 and spray.cost < 2) then return end
     pcall(function()
         local g = ctx:get()
         local player = World.player()
@@ -1191,10 +1303,10 @@ Core.Hooks.add(GIZMO .. ":ActionPress", function(ctx)
             return
         end
         spray.uses = sprayUses(player)
-        if spray.uses >= spray.sections then return end
+        if spray.uses >= spray.cost then return end
         g:ActionRelease()
         local Hud = package.loaded["coop.hud"]
-        if type(Hud) == "table" and Hud.toast then Hud.toast(string.format("A tag this size takes %d sprays", spray.sections)) end
+        if type(Hud) == "table" and Hud.toast then Hud.toast(string.format("A tag this size takes %d sprays", spray.cost)) end
     end)
 end)
 
@@ -1217,7 +1329,11 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
         -- the rest of the paint: the tag's other squares, and everything again for
         -- each time more
         local player = World.player()
-        local sections = squares(kind)
+        -- (sprays one coat takes: what the marker showed; the wall of coop/wallquest.lua one)
+        local sections = (spray.on and spray.cost) or Tags.spraysFor(kind)
+        -- (the game gives the area its respect a second from now, by this number)
+        local respect = Tags.respectFor(kind)
+        if respect ~= 1 then pcall(function() m.defExposureEffect = m.defExposureEffect * respect end) end
         local level = 1
         if player then
             level = math.max(1, paintLevel(sprayUses(player) + 1, sections))
@@ -1227,13 +1343,15 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
                 end
                 if level * sections > 1 then player:refreshBackpackData() end
             end)
-            if level > 1 then pcall(function() m.Lifetime = m.Lifetime * level end) end
+            local life = Tags.lifeFor()
+            if level > 1 or life then pcall(function() m.Lifetime = (life or m.Lifetime) * level end) end
         end
         Tags.stats.paint = level
         local key = wallKey(l.X, l.Y, l.Z)
         owners()[key] = me() ~= worldOwner() and me() or nil
         hows()[key] = (tag.n or 0) .. (kind ~= "s" and kind or "")
         if ownWorld() then
+            kept.coats[key] = level > 1 and level or nil
             kept.seen[key] = os.time()
             keptDirty = true
         end
@@ -1242,7 +1360,7 @@ Core.Hooks.add(GIZMO .. ":PutSpraySymbol", function(ctx)
             local life = 0
             pcall(function() life = m.Lifetime end)
             for _, id in ipairs(World.targets()) do
-                Net.send("tagwall", { p = me(), x = l.X, y = l.Y, z = l.Z, a = r.Pitch, b = r.Yaw, c = r.Roll, l = life, g = tag.n or 0, w = kind == "w" and 1 or 0, k = kind }, id)
+                Net.send("tagwall", { p = me(), x = l.X, y = l.Y, z = l.Z, a = r.Pitch, b = r.Yaw, c = r.Roll, l = life, g = tag.n or 0, w = kind == "w" and 1 or 0, k = kind, n = level }, id)
             end
         end
     end)
@@ -1303,7 +1421,7 @@ Core.every(5, function()
     if not live() or not keptDirty or not loaded then return end
     keptDirty = false
     local keys, n = {}, 0
-    for _, list in ipairs({ kept.owners, kept.how }) do
+    for _, list in ipairs({ kept.owners, kept.how, kept.coats }) do
         for key in pairs(list) do
             if not keys[key] then
                 keys[key] = true
@@ -1314,7 +1432,7 @@ Core.every(5, function()
     if n > 1500 then
         local now = os.time()
         for key in pairs(keys) do
-            if now - (kept.seen[key] or 0) > 30 * 86400 then kept.owners[key], kept.how[key], kept.seen[key] = nil, nil, nil end
+            if now - (kept.seen[key] or 0) > 30 * 86400 then kept.owners[key], kept.how[key], kept.coats[key], kept.seen[key] = nil, nil, nil, nil end
         end
     end
     -- the tags of players who have no wall here any more and are not here are not kept (they

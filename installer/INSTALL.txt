@@ -1,9 +1,9 @@
-DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.19.2
+DDS1 CO-OP  -  Drug Dealer Simulator multiplayer mod  -  v0.19.3
 ================================================================
 
 Windows only. You need Drug Dealer Simulator on Steam, and you and the host
 must be Steam friends. Up to four can play together. Everybody must have the
-same mod version (v0.19.2); the mod refuses to connect different versions.
+same mod version (v0.19.3); the mod refuses to connect different versions.
 
 
 INSTALL
@@ -18,9 +18,10 @@ INSTALL
 5. Start the game from Steam.
 
 CHECK: the main menu now has a MULTIPLAYER entry below SETTINGS. Open it:
-the line under NOT IN A LOBBY starts with "Mod v0.19.2".
+the line under NOT IN A LOBBY starts with "Mod v0.19.3".
 
-Updating from an older version: same steps. The installer replaces the old one.
+Updating from an older version: same steps. The installer replaces the old one
+and keeps the songs in the mod's Music folder.
 
 
 JOIN THE HOST
@@ -65,13 +66,24 @@ KEYS
 V     emote wheel (pick with the mouse)
 U     talk to Marco, who sells clothes at the white rack just right of
       the entrance of Donald's furniture shop, and sit down at the card
-      table in the night club
+      table, a slot machine or the poker table in the night club
 /     chat with everybody in the lobby: type, Enter sends, Esc closes
 F7    leave the lobby
 F8    show lobby status
 F9    MOD OPTIONS (also in the pause menu): repairs, settings, RELOAD of a
       story step that is stuck, and EXPERIMENTAL: switches for new features
-      that are not fully tested yet (all off until you switch one on)
+      that are not fully tested yet (all off until you switch one on),
+      and KEYBINDS: every key of the mod can be changed there
+
+
+YOUR OWN MUSIC
+--------------
+This download includes the music addon. After installing, put mp3 or wav
+files in the game's folder under
+    DrugDealerSimulator\Binaries\Win64\ue4ss\Mods\DDSMultiplayer\Music
+and they join the game's street music and the night club's music. MOD OPTIONS
+(F9) has a MUSIC page, and README.txt in that folder says the rest. In co-op
+the host's songs are sent to the guests.
 
 
 IF SOMETHING GOES WRONG
@@ -112,4 +124,5 @@ Steam launch options for the game must be empty.
 
 UNINSTALL
 ---------
-Delete dwmapi.dll and the ue4ss folder from that Win64 folder.
+Delete dwmapi.dll and the ue4ss folder from that Win64 folder. Your songs are
+in ue4ss\Mods\DDSMultiplayer\Music: move them out first to keep them.

@@ -17,6 +17,9 @@ return {
     -- Open the chat line: Enter sends what you typed to everybody in the lobby, Escape
     -- closes it. "/" is the slash key; "ENTER" works too. "NONE" switches the chat key off.
     ChatKey = "/",
+    -- With the experimental DELIVERY LIST on: goes through the lists at the left of the
+    -- screen (all tasks, deliveries by drug, deliveries by area). "NONE" switches the key off.
+    DeliveryListKey = "O",
     -- Show the other players on the map and the compass.
     ShowPlayersOnMap = true,
 
@@ -77,12 +80,23 @@ return {
     -- takes that many times the sprays).
     TagNextKey = "R",
     TagPaintKey = "C",
+    -- Spray tags (TAGGING in MOD OPTIONS). Sprays one coat of a tag of each shape takes:
+    TagSprays1x1 = 1,
+    TagSprays2x1 = 2,
+    TagSprays3x2 = 6,
+    -- the respect a tag of each shape gives, times what the game gives for a spray
+    -- (in a shared world the host's numbers count for the walls of the guests too):
+    TagRespect1x1 = 1,
+    TagRespect2x1 = 1.5,
+    TagRespect3x2 = 3,
+    -- and the minutes a tag lasts with one coat (the game's own: 15).
+    TagLifetimeMinutes = 15,
     -- false: an emote does not switch to that view by itself.
     EmoteThirdPerson = true,
     CasinoBets = { 50, 100, 250, 500, 1000, 2500 },
     -- What a spin at the club's slot machines can cost.
     SlotBets = { 10, 25, 50, 100, 250, 500 },
-    -- Edwin behind the club's bar puts on a song a player picks, for this much. false: no Edwin.
+    -- Edwin behind the club's bar (talk to him) puts on a song a player picks, for this much. false: no Edwin.
     ClubSongs = true,
     ClubSongPrice = 20,
     -- Poker with La Ballena at his table in the club (Texas hold'em, no limit). false: off.

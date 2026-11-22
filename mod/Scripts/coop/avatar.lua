@@ -1314,7 +1314,12 @@ local function describe(actor, own)
     end
     local rot = actor:K2_GetActorRotation()
     local yaw = rot.Yaw
-    if own and Avatar.sendYaw then yaw = Avatar.sendYaw end
+    if own and Avatar.seatedAt then
+        -- (in a seat that turns the figure its own way: looking around does not turn it)
+        yaw = Avatar.seatedAt.yaw
+    elseif own and Avatar.sendYaw then
+        yaw = Avatar.sendYaw
+    end
     local vel = actor:GetVelocity()
     return string.format("%.0f,%.0f,%.0f,%.0f,%.0f", loc.X, loc.Y, loc.Z, yaw, math.sqrt(vel.X * vel.X + vel.Y * vel.Y)), loc
 end
@@ -1700,6 +1705,18 @@ function Avatar.stepOwn(p, player, dt)
         if math.abs(half - p.half) > 0.5 then
             p.half = half
             p.body:K2_SetActorLocation({ X = l.X, Y = l.Y, Z = l.Z - half }, false, {}, true)
+        end
+    elseif Avatar.seatedAt then
+        -- Held in a seat whose pose sets the figure elsewhere than the player (the poker
+        -- table's armchairs): the figure is placed from the seat, not from where the player
+        -- stood and faced before sitting down. (holdThings adds the pose's own shift.)
+        local s = Avatar.seatedAt
+        local half = p.half
+        pcall(function() half = player.CapsuleComponent:GetScaledCapsuleHalfHeight() end)
+        if p.x ~= s.x or p.y ~= s.y or p.yaw ~= s.yaw or p.z ~= l.Z or math.abs(half - p.half) > 0.5 then
+            p.x, p.y, p.z, p.yaw, p.half = s.x, s.y, l.Z, s.yaw, half
+            local at, rot = bodyPlace(p, l.Z - half)
+            p.body:K2_SetActorLocationAndRotation(at, rot, false, {}, true)
         end
     end
     local crouch = false

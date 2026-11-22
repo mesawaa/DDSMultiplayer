@@ -3,21 +3,28 @@
 Co-op mod for Drug Dealer Simulator (Unreal Engine 4.21, Steam app 682990): Steam lobbies
 and invites, and a shared world hosted by one player, for up to four players.
 
-This repository holds the complete source of the mod: the Lua scripts and the one piece of
-compiled code, the Steam bridge DLL.
+This repository holds the complete source of the mod: the Lua scripts and the two pieces of
+compiled code, the Steam bridge DLL and the DLL of the optional music addon.
 
 ## What is in a release archive
 
 | File in the archive | What it is | Source |
 |---|---|---|
 | `ue4ss/Mods/DDSMultiplayer/Scripts/**.lua` | The mod. Plain Lua, run by UE4SS. | `mod/Scripts/` here |
-| `ue4ss/Mods/DDSMultiplayer/assets/**.png` | Pictures the mod loads (the scratch tickets). | `mod/assets/` here |
+| `ue4ss/Mods/DDSMultiplayer/assets/**.png` | Pictures the mod loads (scratch tickets, slot machines). | `mod/assets/` here |
 | `ue4ss/Mods/DDSMultiplayer/bin/ddsmp_steam.dll` | Steam bridge: lobbies and messages between players. | `steam-bridge/` here |
+| `ue4ss/Mods/DDSMultiplayer/bin/ddsmp_audio.dll` | Music addon: plays the mp3 and wav files of the mod's `Music` folder. | `audio-addon/` here |
+| `ue4ss/Mods/DDSMultiplayer/Scripts/coop/music.lua`, `ue4ss/Mods/DDSMultiplayer/Music/README.txt` | The music addon's script and the text of its folder. | `mod/Scripts/coop/music.lua`, `mod/Music/` here |
 | `dwmapi.dll`, `ue4ss/UE4SS.dll` | UE4SS v3.0.1 (experimental), the script loader the mod runs on. Not part of this project. | https://github.com/UE4SS-RE/RE-UE4SS |
 | `ue4ss/UE4SS-settings.ini`, `ue4ss/Mods/mods.txt` and UE4SS's own stock mods | UE4SS's configuration and bundled Lua mods. | UE4SS |
 | `Install.bat`, `Install.ps1`, `DDSMultiplayer-INSTALL.txt` | Optional installer: finds the game folder and copies the files into it. Plain text. | `installer/` here |
 
 Nothing else is compiled. There is no executable, and the mod downloads nothing.
+
+The music addon is optional: the mod runs the same without `coop/music.lua` and
+`ddsmp_audio.dll`. The archive with the installer includes it. On Nexus Mods the main file
+has no installer and no addon, and the addon is a file of its own (the same three files
+plus `MusicAddon-INSTALL.txt`, here in `installer/`).
 
 ## Building the Steam bridge
 
@@ -54,6 +61,39 @@ It is loaded into the game process by the Lua mod (`package.loadlib` in
 It does not read or write anything outside the mod's folder, and it talks to no server
 other than Steam's, through the game's own Steam library.
 
+## Building the music addon
+
+```
+cd audio-addon
+set RUSTFLAGS=--remap-path-prefix=%USERPROFILE%\.cargo=cargo
+cargo build --release --locked
+```
+
+The result is `audio-addon\target\release\ddsmp_audio.dll`; it goes to the same `bin`
+folder. The `RUSTFLAGS` line keeps the builder's user folder out of the DLL (Rust stores
+the source paths of its dependencies for error messages). The released DLL was built with
+rustc 1.95.0.
+
+It depends on `symphonia` 0.5 with the mp3, wav and pcm features (pure Rust; the exact
+versions of it and of what it pulls in are in `audio-addon/Cargo.lock`).
+
+## What the music addon does
+
+It is loaded into the game process by `mod/Scripts/coop/music.lua` (`package.loadlib`) and
+does this:
+
+- It reads the mp3 and wav files of the mod's `Music` folder, decodes them and plays them
+  through the Windows wave output (`winmm`). The game itself cannot load a sound file at
+  run time. The files are only read.
+- It exchanges text with the Lua side through two files of its own in the mod's `ipc`
+  folder (`music_cmd.txt`, `music_evt.txt`). The commands are listed at the top of
+  `audio-addon/src/audio.rs`.
+- In co-op a guest receives the host's songs through the Steam bridge into
+  `Music\_from_host`; the addon moves a received file to its name there and can open the
+  `Music` folder in Explorer when the player presses the button for it.
+
+It opens no network connection.
+
 ## Installing by hand
 
 Copy the contents of a release archive into
@@ -67,9 +107,11 @@ To remove the mod, delete `dwmapi.dll` and the `ue4ss` folder from that director
 
 ```
 mod/Scripts/       the mod (Lua): core.lua, net.lua, ui.lua, coop/*.lua ...
-mod/assets/        pictures the mod loads (scratch tickets)
+mod/assets/        pictures the mod loads (scratch tickets, slot machines)
+mod/Music/         README.txt of the folder for the player's own songs
 steam-bridge/      the bridge (Rust): Cargo.toml, Cargo.lock, src/lib.rs
-installer/         Install.bat, Install.ps1, INSTALL.txt
+audio-addon/       the music addon's DLL (Rust): Cargo.toml, Cargo.lock, src/lib.rs, src/audio.rs
+installer/         Install.bat, Install.ps1, INSTALL.txt, MusicAddon-INSTALL.txt
 ```
 
 ## Credits

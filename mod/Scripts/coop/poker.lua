@@ -85,7 +85,13 @@ end
 local tune = { sit = 90, eye = 120, pitch = -30,
     pose = { [SMOKE_BREAK] = { fwd = 12, right = 0, up = 0 }, [LOUNGE_POSE] = { fwd = 8, right = 0, up = 0 } } }
 Poker.tune = tune
-Third.tune.armchair = Third.tune.armchair or { back = 150, side = 0, up = 70 }
+-- The view from behind: the figure sits well behind where the player is held, so the view
+-- is that much further back than at the card table (about 85 behind the figure's head and
+-- 110 above it, the view turned 30 degrees down). The leaning pose holds the player to
+-- one side of the armchair: its view is moved back over the armchair's middle.
+Third.tune.armchair = { back = 214, side = 0, up = 31 }
+Third.tune.armchairLounge = { back = 214, side = 34, up = 31 }
+local function viewShape(pose) return pose == LOUNGE_POSE and "armchairLounge" or "armchair" end
 
 local RANKS = { "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K" }
 local SUITS = { "\226\153\160", "\226\153\165", "\226\153\166", "\226\153\163" }   -- spade heart diamond club
@@ -1356,7 +1362,7 @@ local function setView(behind)
     viewChoice = behind
     scr.keepView = behind
     Avatar.sendZ = FLOOR + tune.sit + seat.place.up - seat.z
-    Third.force = behind and "armchair" or nil
+    Third.force = behind and viewShape(seat.pose) or nil
     pcall(function() player:K2_SetActorLocation({ X = seat.place.x, Y = seat.place.y, Z = seat.z }, false, {}, true) end)
     return true
 end
@@ -1412,6 +1418,7 @@ function Poker.enter()
         return false
     end
     scr.keepView = behind
+    Casino.standUp(player)
     pcall(function()
         Casino.ghost(player, true)
         player.CharacterMovement:SetMovementMode(5, 0)       -- flying: nothing pulls the seated player down
@@ -1421,7 +1428,10 @@ function Poker.enter()
     end)
     pcall(function() player.HUD:SetVisibility(1) end)
     Avatar.noEmoteView, Avatar.sendZ = not behind, FLOOR + tune.sit + seat.place.up - seat.z
-    Third.force = behind and "armchair" or nil
+    -- (the figure sits where the armchair is and faces the table, wherever the player stood
+    -- and looked before, and whatever they look at from the seat)
+    Avatar.seatedAt = { x = seat.place.x, y = seat.place.y, yaw = seat.place.yaw }
+    Third.force = behind and viewShape(seat.pose) or nil
     pcall(Avatar.setEmote, seat.pose)
     Poker.seated = true
     my = { state = "buyin", stack = 0 }
@@ -1469,7 +1479,7 @@ function Poker.leave()
         end)
         pcall(function() player.HUD:SetVisibility(seat.hud or 4) end)
     end
-    Avatar.noEmoteView, Avatar.sendZ = nil, nil
+    Avatar.noEmoteView, Avatar.sendZ, Avatar.seatedAt = nil, nil, nil
     Third.force = nil
     pcall(Avatar.setEmote, 0)
     seat = nil
@@ -1505,7 +1515,7 @@ end
 local function forget()
     Poker.seated, scr, seat, shown, timer, slider = false, nil, nil, {}, nil, nil
     my = { state = nil, stack = 0 }
-    Avatar.noEmoteView, Avatar.sendZ = nil, nil
+    Avatar.noEmoteView, Avatar.sendZ, Avatar.seatedAt = nil, nil, nil
     Third.force = nil
 end
 

@@ -274,6 +274,29 @@ local function placePrompt()
     end)
 end
 
+-- EXPERIMENTAL UseWithF: a prompt for the key of the mod's places says F, the game's own
+-- use key, as long as the game shows no hint of its own (then F is the game's, and the
+-- prompt keeps the mod's key). A line under the game's hint keeps the mod's key too.
+Hud.USE_KEY = "F"
+
+local function shownKey(key)
+    if not key or st.promptUnder or not Core.experimental("UseWithF") then return key end
+    if tostring(key):upper() ~= tostring(Core.config.WardrobeKey or "U"):upper() then return key end
+    if gameHint() then return key end
+    return Hud.USE_KEY
+end
+
+-- The key the prompt shows now (nil without a prompt).
+function Hud.promptKey()
+    return st and st.promptText and st.promptShown or nil
+end
+
+-- True while the game shows a hint of its own (what it would do on its use key).
+function Hud.gameHintShown()
+    if not st then return false end
+    return (gameHint()) == true
+end
+
 -- key: what to press ("U"); action: what it does ("SIT DOWN"). nil hides the prompt.
 -- under: a line below the game's own hint, written as the game writes its hints (the
 -- action as given, not in capitals).
@@ -283,8 +306,10 @@ function Hud.prompt(key, action, under)
     if str == st.promptText then return end
     st.promptText = str
     st.promptUnder = under == true
+    st.promptRaw = key
     if str then
-        st.promptKey:SetText(text(tostring(key):upper()))
+        st.promptShown = shownKey(key)
+        st.promptKey:SetText(text(tostring(st.promptShown):upper()))
         st.promptLabel:SetText(text(under and tostring(action or "") or tostring(action or ""):upper()))
         placePrompt()
         st.prompt:SetVisibility(NO_HIT)
@@ -296,6 +321,14 @@ end
 -- The game's hint comes and goes as the player looks about.
 Core.onTick(function()
     if st and st.promptUnder and st.promptText then placePrompt() end
+    -- (F or the mod's key, as the game's hint comes and goes)
+    if st and st.promptText and valid(st.promptKey) then
+        local k = shownKey(st.promptRaw)
+        if k ~= st.promptShown then
+            st.promptShown = k
+            pcall(function() st.promptKey:SetText(text(tostring(k):upper())) end)
+        end
+    end
 end)
 
 -- A short message, in the game's own list of them (on the left, with its red mark). While

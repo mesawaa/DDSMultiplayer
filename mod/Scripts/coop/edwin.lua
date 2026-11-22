@@ -1,7 +1,9 @@
 -- Edwin, behind the bar of the night club.
 --
--- He stands behind the counter with his music in his ears, walking on the spot. For a few
--- dollars he puts on the song a player picks: it plays at once on the club's speaker, for
+-- He stands behind the arm of the counter, at its monitor, with his music in his ears,
+-- walking on the spot. Talking to him uses the game's own dialogue screen (as with the
+-- mod's shopkeepers: coop/clerk.lua); asked for a song he shows the list, and for a few
+-- dollars he puts on the one a player picks: it plays at once on the club's speaker, for
 -- everybody (coop/casino.lua plays the club's music; the songs to pick from are the ones it
 -- plays by itself). Every game puts its own Edwin there; nothing of him is saved.
 
@@ -13,6 +15,7 @@ local Hud = require("coop.hud")
 local Look = require("coop.look")
 local Screen = require("coop.screen")
 local Casino = require("coop.casino")
+local Repl = require("coop.repl")
 
 local log, valid = Core.log, Core.valid
 
@@ -20,12 +23,13 @@ local GEN = (rawget(_G, "DDSMP_EDWIN_GEN") or 0) + 1
 _G.DDSMP_EDWIN_GEN = GEN
 local function live() return rawget(_G, "DDSMP_EDWIN_GEN") == GEN end
 
-local Edwin = { open = false }
+local Edwin = { open = false, NAME = "Edwin" }
 
--- Behind the counter (which runs along y -7925, the shelves along the wall at -7675), on
--- the bar's floor, turned to the room.
+-- The counter runs along y -7892 and has an arm into the room at x 14670 (y -8145 to
+-- -7925) with a monitor on it at y -8030, its screen to the barman's side. He stands at
+-- that monitor, on the bar's floor, turned to the players across the arm.
 local FLOOR = -195
-local SPOT = { x = 14850, y = -7845, yaw = -90 }
+local SPOT = { x = 14600, y = -8030, yaw = 0 }
 Edwin.SPOT = SPOT
 -- (sports T-shirt, army cap worn backwards, sports sunglasses)
 local LOOK = { body = "SK_ma_sport_01_b#MI_ma_sport_01_base", head = "SK_ma_head_05_asian", hair = "",
@@ -46,11 +50,53 @@ end
 
 ---------------------------------------------------------------- the man
 
-local fig = nil          -- { owner, p }
+local fig = nil          -- { owner, p, dialogue }
+local talking = 0        -- time the dialogue was started
 
 local function clear()
-    if fig and fig.p and not World.gone then pcall(Avatar.destroyStandIn, fig.p) end
+    if fig and not World.gone then
+        if fig.p then pcall(Avatar.destroyStandIn, fig.p) end
+        pcall(function() if valid(fig.dialogue) then fig.dialogue:K2_DestroyActor() end end)
+    end
     fig = nil
+end
+
+-- The dialogue: the furniture shopkeeper's own lines with other words (see coop/clerk.lua).
+-- The first answer ends the talk and has the dialogue actor's (empty) DialogueLoaded event
+-- called, which is how this module hears of it.
+local function dialogueText(cost)
+    local template = nil
+    for _, d in ipairs(Core.actors("/Game/Interactive/dialogueInstance.dialogueInstance_C") or {}) do
+        if not template and Core.alive(d) then
+            local v = Repl.export(d, { "dialogueLines" }).dialogueLines
+            if type(v) == "string" and v:find('"Show me your products"', 1, true) and v:find('"How can I help you?"', 1, true) then template = v end
+        end
+    end
+    if not template then return nil end
+    local function swap(text, old, new)
+        local out, from = {}, 1
+        while true do
+            local a, b = text:find(old, from, true)
+            if not a then break end
+            out[#out + 1] = text:sub(from, a - 1) .. new
+            from = b + 1
+        end
+        out[#out + 1] = text:sub(from)
+        return table.concat(out)
+    end
+    local t = swap(template, '"How can I help you?"', '"What do you want to hear?"')
+    local a, b = t:find('ResponseText_2_3DC4585B4FB4F1C79DACFAA7F3A5BBD7="Show me your products"', 1, true)
+    if not a then return nil end
+    local close = t:find(")", b, true)
+    local changed = t:sub(a, close)
+    local ask = cost > 0 and string.format('"Put a song on for me ($%d)"', cost) or '"Put a song on for me"'
+    changed = swap(changed, '"Show me your products"', ask)
+    changed = changed:gsub("(ExitsDialogue_8_%x+=)%a+", "%1True", 1)
+    changed = changed:gsub("(EntersSale_10_%x+=)%a+", "%1False", 1)
+    changed = changed:gsub('(questEventName_14_%x+=)"[^"]*"', '%1"DialogueLoaded"', 1)
+    changed = changed:gsub("(LocalFunction_19_%x+=)%a+", "%1True", 1)
+    t = t:sub(1, a - 1) .. changed .. t:sub(close + 1)
+    return swap(t, '"Just passing, sorry"', '"Nothing, thanks"')
 end
 
 local function ensure()
@@ -62,15 +108,26 @@ local function ensure()
     if fig or not active() or not Casino.nearClub() then return end
     fig = { owner = player:GetAddress() }
     local ok, e = pcall(function()
-        fig.p = Avatar.buildStandIn(LOOK, SPOT.x, SPOT.y, FLOOR + 90, SPOT.yaw, "EDWIN")
+        -- (no name over his head: the dialogue screen names him, as it does everybody)
+        fig.p = Avatar.buildStandIn(LOOK, SPOT.x, SPOT.y, FLOOR + 90, SPOT.yaw, nil)
         if fig.p then Avatar.poseStandIn(fig.p, STRUT) end
     end)
     if not ok or not fig.p then
         log("Edwin: could not be put behind the bar: %s", tostring(e))
         fig.failed = true
-    else
-        log("Edwin: behind the bar")
+        return
     end
+    pcall(function()
+        local text = dialogueText(price())
+        local class = StaticFindObject("/Game/Interactive/dialogueInstance.dialogueInstance_C")
+        if not text or not valid(class) then return end
+        local d = player:GetWorld():SpawnActor(class, { X = SPOT.x, Y = SPOT.y, Z = FLOOR + 90 }, { Pitch = 0, Yaw = 0, Roll = 0 })
+        if not valid(d) then return end
+        -- this copy is ours alone: it must not be written into anybody's save
+        pcall(function() if valid(d.RamaSave) then d.RamaSave:K2_DestroyComponent(d) end end)
+        if Repl.importRaw(d, "dialogueLines", text) then fig.dialogue = d end
+    end)
+    log("Edwin: behind the bar (dialogue %s)", tostring(fig.dialogue ~= nil))
 end
 
 ---------------------------------------------------------------- the songs
@@ -114,9 +171,28 @@ local function listSongs()
 end
 Edwin.songs = listSongs
 
+-- the music addon (coop/music.lua): the host's own tracks, on a tab of their own.
+local CUSTOM = { name = "CUSTOM" }
+local PER_PAGE = 15
+
+local function customSongs()
+    local M = package.loaded["coop.music"]
+    if type(M) ~= "table" or not M.hostTracks then return {} end
+    local out = {}
+    for _, t in ipairs(M.hostTracks()) do out[#out + 1] = { custom = t.id, title = t.title } end
+    return out
+end
+
+local function kinds()
+    local list = {}
+    for _, k in ipairs(KINDS) do list[#list + 1] = k end
+    if #customSongs() > 0 then list[#list + 1] = CUSTOM end
+    return list
+end
+
 ---------------------------------------------------------------- the screen
 
-local scr, shown, tab = nil, {}, 1
+local scr, shown, tab, pageNo = nil, {}, 1, 1
 local render
 
 local function put(widget, ax, ay, x, y)
@@ -150,11 +226,15 @@ local function pick(song)
         return render()
     end
     if authority() then
-        if not Casino.pickTrack(song.index) then
+        local done = false
+        if song.custom then done = Casino.pickCustom(song.custom) else done = Casino.pickTrack(song.index) end
+        if not done then
             Casino.pay(cost)
             Hud.toast("Edwin cannot put that one on", 3)
             return render()
         end
+    elseif song.custom then
+        Net.send("djp", { c = song.custom }, World.host or Net.S.owner)
     else
         Net.send("djp", { i = song.index }, World.host or Net.S.owner)
     end
@@ -168,10 +248,13 @@ Edwin.pick = function(index)
         for _, song in ipairs(list) do if song.index == index then return pick(song) end end
     end
 end
+Edwin.pickCustom = function(id)
+    for _, song in ipairs(customSongs()) do if song.custom == id then return pick(song) end end
+end
 
 Net.on("djp", function(sender, data)
     if not live() or World.role ~= "host" or not World.inWorld[sender] or not active() then return end
-    Casino.pickTrack(data.i)
+    if type(data.c) == "string" then Casino.pickCustom(data.c) else Casino.pickTrack(data.i) end
 end)
 
 render = function()
@@ -183,17 +266,42 @@ render = function()
     put(scr.text("EDWIN", "button", 46), 0.5, 0.13)
     put(scr.text(string.format("PICK A SONG   $%d", cost), "button", 24), 0.5, 0.195)
     put(scr.text(string.format("CASH  $%d", money), "button", 18), 0.5, 0.24)
-    for k, kind in ipairs(KINDS) do
-        local b = button(kind.name, 1.4, 0.5, 0.32, (k - (#KINDS + 1) / 2) * 200, 0, function() tab = k render() end)
+    local tabs = kinds()
+    if tab > #tabs then tab = 1 end
+    for k, kind in ipairs(tabs) do
+        local b = button(kind.name, 1.4, 0.5, 0.32, (k - (#tabs + 1) / 2) * 200, 0, function()
+            if tab ~= k then tab, pageNo = k, 1 end
+            render()
+        end)
         scr.tint(b, k == tab and Screen.GREEN or Screen.WHITE)
     end
     local playing = nil
-    pcall(function() playing = titles[Casino.music().index] end)
-    for n, song in ipairs(all[tab] or {}) do
-        local col, line = (n - 1) % 3, (n - 1) // 3
-        local b = button(song.title, 1.4, 0.5, 0.43 + line * 0.07, (col - 1) * 360, 0, function() pick(song) end)
+    pcall(function()
+        local dj = Casino.music()
+        if dj.custom then
+            local M = package.loaded["coop.music"]
+            playing = type(M) == "table" and M.title(dj.custom) or nil
+        else
+            playing = titles[dj.index]
+        end
+    end)
+    local list = tabs[tab] == CUSTOM and customSongs() or (all[tab] or {})
+    local pages = math.max(1, math.ceil(#list / PER_PAGE))
+    if pageNo > pages then pageNo = 1 end
+    for n = (pageNo - 1) * PER_PAGE + 1, math.min(#list, pageNo * PER_PAGE) do
+        local song = list[n]
+        local i = n - (pageNo - 1) * PER_PAGE
+        local col, line = (i - 1) % 3, (i - 1) // 3
+        local label = #song.title > 26 and (song.title:sub(1, 25) .. "...") or song.title
+        local b = button(label, 1.4, 0.5, 0.43 + line * 0.07, (col - 1) * 360, 0, function() pick(song) end)
         if money < cost then scr.enable(b, false) end
         if song.title == playing then scr.tint(b, Screen.GREEN) end
+    end
+    if pages > 1 then
+        button(string.format("MORE  %d/%d", pageNo, pages), 1.2, 0.5, 0.785, 0, 0, function()
+            pageNo = pageNo % pages + 1
+            render()
+        end)
     end
     if playing then put(scr.text("NOW PLAYING   " .. playing, "button", 20), 0.5, 0.84) end
     button("CLOSE", 1.4, 0.5, 0.92, 0, 0, close)
@@ -217,6 +325,31 @@ end
 Edwin.close = close
 Edwin.refresh = function() if render then render() end end
 
+-- Starts the talk with him. Returns false when it cannot (the list is shown directly then).
+function Edwin.talk()
+    local player = World.player()
+    if not player or not fig or not valid(fig.dialogue) then return false end
+    local ok, e = pcall(function()
+        talking = os.clock()
+        player:startDialogue(fig.dialogue)
+        -- there is no game NPC to turn the camera to or to name
+        player.focusCamera = false
+        player.dialogueWidget.txtTalkerName:SetText(FText(Edwin.NAME))
+    end)
+    if not ok then log("Edwin: dialogue failed: %s", tostring(e)) end
+    return ok
+end
+
+Core.Hooks.add("/Game/Interactive/dialogueInstance.dialogueInstance_C:DialogueLoaded", function(ctx)
+    if not live() or not fig or not fig.dialogue or os.clock() - talking > 600 then return end
+    local ok, mine = pcall(function() return ctx:get():GetAddress() == fig.dialogue:GetAddress() end)
+    if not ok or not mine then return end
+    talking = 0
+    Core.after(0.25, function()
+        if live() then pcall(Edwin.show) end
+    end)
+end)
+
 ---------------------------------------------------------------- at the bar
 
 local function turnedFrom(player, l, x, y)
@@ -226,10 +359,14 @@ local function turnedFrom(player, l, x, y)
     return math.abs(((math.deg(math.atan(y - l.Y, x - l.X)) - at + 180) % 360) - 180)
 end
 
--- At the counter in front of him (or with him behind it), turned his way.
+-- Across the counter's arm from him (or with him behind it), turned his way; not while a
+-- talk is on.
 local function nearEdwin()
     local player = World.player()
     if not player or not active() or not fig or not fig.p then return false end
+    local busy = false
+    pcall(function() busy = player.inDialogue == true end)
+    if busy then return false end
     local l = player:K2_GetActorLocation()
     if math.abs(l.Z - (FLOOR + 90)) > 130 then return false end
     local d = (l.X - SPOT.x) ^ 2 + (l.Y - SPOT.y) ^ 2
@@ -245,14 +382,14 @@ Edwin.takeover = {
     isOpen = function() return (live() and Edwin.open) or UNDER.isOpen() end,
     near = function() return (live() and not UNDER.isOpen() and nearEdwin()) or UNDER.near() end,
     prompt = function()
-        if live() and nearEdwin() then return key("WardrobeKey"), string.format("Pick a song ($%d)", price()) end
+        if live() and nearEdwin() then return key("WardrobeKey"), "Talk" end
         return UNDER.prompt()
     end,
     toggle = function()
         if live() and Edwin.open then
             close()
         elseif live() and not UNDER.isOpen() and nearEdwin() then
-            Edwin.show()
+            if not Edwin.talk() then Edwin.show() end
         else
             UNDER.toggle()
         end
