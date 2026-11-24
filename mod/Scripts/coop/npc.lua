@@ -118,6 +118,9 @@ end
 
 Core.Hooks.add("/Game/Skeletal/NPC/baseNPC.baseNPC_C:drugSaleSuccesfull", reportGone("sold"))
 Core.Hooks.add("/Game/Skeletal/NPC/baseNPC.baseNPC_C:clientResignedWaiting", reportGone("left"))
+-- (a dealer handing over the cash is an event of its own: without it the dealer and the
+-- "collect the cash" marker stayed in the other games after one player had been there)
+Core.Hooks.add("/Game/Skeletal/NPC/baseNPC.baseNPC_C:CashDeliverySuccessfull", reportGone("cash"))
 
 ---------------------------------------------------------------- the other game's spawns
 

@@ -1,4 +1,4 @@
--- Marking a client's order as one's own (EXPERIMENTAL: ClientMarks).
+-- Marking a client's order as one's own (TWEAKS: ClientMarks).
 --
 --   * A click on the picture of a client or a dealer in Shady Comm's contact list marks
 --     their open order (one still to be answered, or accepted and still to be delivered)
@@ -438,7 +438,7 @@ local function clicks()
     end
 end
 
--- AUTOMATICALLY MARK ACCEPTED DELIVERIES (a setting of this feature): the order this player
+-- Automatically mark accepted deliveries (a setting of this feature): the order this player
 -- has just confirmed on Shady Comm is marked for them, unless somebody has it already.
 Core.Hooks.add(INTERFACE .. ":" .. CONFIRM, function(ctx)
     if not live() or not on() or not Core.experimental("AutoMark") then return end
@@ -951,7 +951,7 @@ Colours.onChange(function()
     map.painted, compass.painted = {}, {}
 end)
 
--- (the switch on the EXPERIMENTAL page)
+-- (the switch on the TWEAKS page)
 function Marks.apply()
     dirty = true
     map.painted = {}

@@ -8,6 +8,7 @@ It is on as soon as the addon is installed. MOD OPTIONS (F9) has a MUSIC page:
 - REPLACE THE GAME'S MUSIC (off at first): off, your songs play along with the
   game's; on, where you have songs only yours play.
 - Every song plays in ALL AREAS, or only in the areas you pick under AREAS.
+- A folder of songs is one row: pick the areas for the whole folder.
 - RESCAN reads the folder again.
 
 AN AREA'S OWN SONGS
@@ -25,6 +26,11 @@ area only (with the game's songs, or alone with REPLACE on). The names
   Commune
   Fancy hill
   The club        (La Ballena's night club)
+
+YOUR OWN FOLDERS
+A folder with any other name (say "Rap" or "Chill") is shown on the MUSIC page
+as one row under FOLDERS. All its songs play in ALL AREAS, or only in the
+areas you pick for the folder under AREAS.
 
 CO-OP
 The host's songs (with the host's areas and folders) are sent to every guest

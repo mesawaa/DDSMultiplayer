@@ -323,7 +323,9 @@ end
 -- the pointer is found switched off, and otherwise twice a second, which costs nothing when
 -- nothing was lost. Never while a mouse button is down (taking the mouse lets go of a
 -- pressed button and of the held look-around at the card table) and never while one of the
--- game's windows is up (those need the mouse themselves).
+-- game's windows is up (those need the mouse themselves). A button held on a widget of the
+-- engine's own (the handle of a scroll bar, of a slider) is not seen as down from here: a
+-- screen with such a widget says when to leave the mouse alone (`s.holdMouse()`).
 local GAME_WINDOWS = { "inventoryOpen", "phoneUp", "computerOpen", "mapOpen", "saveScreenOpen", "isTrading" }
 local LMB, RMB = nil, nil
 
@@ -347,6 +349,13 @@ local function keepMouse(s, anyDown)
     LMB = LMB or { KeyName = FName("LeftMouseButton") }
     RMB = RMB or { KeyName = FName("RightMouseButton") }
     if pc:IsInputKeyDown(LMB) == true or pc:IsInputKeyDown(RMB) == true then return end
+    if not lost and s.holdMouse then
+        local ok, hold = pcall(s.holdMouse)
+        if ok and hold == true then
+            s.held = (s.held or 0) + 1
+            return
+        end
+    end
     s.mouseAt = now + 0.5
     library():SetInputMode_GameAndUIEx(pc, s.widget, 0, false)
     pc.bShowMouseCursor = true

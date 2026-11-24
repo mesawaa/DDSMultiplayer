@@ -1096,8 +1096,41 @@ local function noticeSkip(total)
     return false
 end
 
+-- The game's own waiting and sleeping do not jump the clock: they run the whole game of the
+-- player who waits many times faster until the hour asked for is reached. That game's clock
+-- leads then: its time goes to the others every second, and it takes no time from anybody
+-- that would put it back (a waiting guest was put back to the host's time every few
+-- seconds, so the wait never came to its end). When several players wait at once, each at
+-- the speed of their own hideout, all of them go at the speed of the fastest: the speed
+-- travels with the time, and a waiting game that is slower takes it over.
+local rushing, rushLookAt, rushSentAt, rushRate = false, 0, 0, 1
+local RUSH_MAX = 60          -- (no speed from another game above this is taken)
+
+local function rushingNow()
+    local now = os.clock()
+    if now < rushLookAt then return rushing end
+    rushLookAt = now + 0.5
+    rushing = false
+    pcall(function()
+        local player = Core.player()
+        rushRate = player ~= nil and Core.statics():GetGlobalTimeDilation(player) or 1
+        rushing = rushRate > 1.5
+    end)
+    return rushing
+end
+
 local function pollClock()
     if not Core.enabled("Time") or not World.shared() then return end
+    if rushingNow() then
+        local now = os.clock()
+        if now - rushSentAt < 1 then return end
+        rushSentAt = now
+        local total = clockNow()
+        if not total then return end
+        lastMinutes = total
+        sendAction({ a = "time", to = total, d = rushRate })
+        return
+    end
     local total = clockNow()
     if not total then return end
     if noticeSkip(total) then
@@ -1128,12 +1161,22 @@ Net.on("act", function(sender, data)
             local target = tonumber(data.a == "time" and data.to or data.now)
             if not total or not target then return end
             if data.a == "time" then
+                -- Somebody who waits faster than this game does: wait as fast.
+                local rate = tonumber(data.d)
+                if rate and rate <= RUSH_MAX and rushingNow() and rate > rushRate + 0.25 then
+                    local player = Core.player()
+                    if player then
+                        Core.statics():SetGlobalTimeDilation(player, rate)
+                        log("Sync: waiting at the speed of %s (%.0f times, was %.0f)", Net.name(sender), rate, rushRate)
+                        rushRate = rate
+                    end
+                end
                 -- Somebody skipped ahead: follow, never go back.
                 if target - total >= 1 then
                     setClock(clock, target)
                     vlog("Sync: time skip applied (+%.0f game minutes)", target - total)
                 end
-            elseif World.role == "guest" and not noticeSkip(total) and math.abs(target - total) >= DRIFT_LIMIT then
+            elseif World.role == "guest" and not (rushingNow() and target < total) and not noticeSkip(total) and math.abs(target - total) >= DRIFT_LIMIT then
                 setClock(clock, target)
                 vlog("Sync: clock corrected by %.0f game minutes", target - total)
             end

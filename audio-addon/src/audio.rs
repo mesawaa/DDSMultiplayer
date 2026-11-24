@@ -6,7 +6,10 @@
 //!
 //! Commands (music_cmd.txt, see lib.rs):
 //!   MPLAY <slot> <ms> <path>     play the file from `ms` milliseconds on (slot: a short name)
-//!   MVOL <slot> <left> <right>   loudness 0..1 for each ear (silent until the first one)
+//!   MVOL <slot> <left> <right> [hz]   loudness 0..1 for each ear (silent until the first
+//!                                one); hz: a low-pass filter at that frequency, as the
+//!                                game muffles its own music with distance (none or 0: no
+//!                                filter)
 //!   MSTOP <slot> | MSTOPALL
 //!   MSCAN <dir>                  -> MFILE name size, ..., MSCANEND count; the files of the
 //!                                folder and of its folders one level down ("Stink/a.mp3")
@@ -90,6 +93,8 @@ const FRAMES: usize = 2048; // per buffer (46 ms)
 const BUFFERS: usize = 4;
 const WAVE_MAPPER: u32 = 0xFFFF_FFFF;
 const WHDR_DONE: u32 = 1;
+const OPEN_HZ: f32 = 19_000.0; // from here up a voice is not filtered
+const FILTER_STEP: usize = 32; // frames between two settings of the filter
 
 enum Msg {
     Line(String),
@@ -174,6 +179,10 @@ pub struct Voice {
     right: f32,
     cur_left: f32,
     cur_right: f32,
+    // the low-pass filter: where it is to be, where it is, and what it holds for each ear
+    hz: f32,
+    cur_hz: f32,
+    filter: [[f32; 2]; 2],
 }
 
 impl Voice {
@@ -186,7 +195,7 @@ impl Voice {
             let time = Time::new(ms / 1000, (ms % 1000) as f64 / 1000.0);
             format.seek(SeekMode::Accurate, SeekTo::Time { time, track_id: Some(track) }).map_err(|e| e.to_string())?;
         }
-        Ok(Voice { format, decoder, track, rate, buf: Vec::new(), pos: 0.0, done: false, left: 0.0, right: 0.0, cur_left: 0.0, cur_right: 0.0 })
+        Ok(Voice { format, decoder, track, rate, buf: Vec::new(), pos: 0.0, done: false, left: 0.0, right: 0.0, cur_left: 0.0, cur_right: 0.0, hz: OPEN_HZ, cur_hz: OPEN_HZ, filter: [[0.0; 2]; 2] })
     }
 
     /// Decodes the next packet onto the end of `buf`. False at the end of the file.
@@ -229,7 +238,19 @@ impl Voice {
         let step = self.rate / RATE as f64;
         let (tl, tr) = if focused { (self.left, self.right) } else { (0.0, 0.0) };
         let (sl, sr) = (self.cur_left, self.cur_right);
+        // The filter (two poles, the kind the game's sound output has) glides to its new
+        // frequency over the buffer, in equal ratios; fully open it is left out.
+        let (sh, th) = (self.cur_hz, self.hz);
+        let filtered = sh < OPEN_HZ || th < OPEN_HZ;
+        let (mut a1, mut a2, mut a3) = (0.0f32, 0.0f32, 0.0f32);
         for i in 0..frames {
+            if filtered && i % FILTER_STEP == 0 {
+                let hz = sh * (th / sh).powf(i as f32 / frames as f32);
+                let g = (std::f32::consts::PI * hz.clamp(20.0, OPEN_HZ) / RATE as f32).tan();
+                a1 = 1.0 / (1.0 + g * (g + 1.0));
+                a2 = g * a1;
+                a3 = g * a2;
+            }
             let need = self.pos as usize + 2;
             while !self.done && self.buf.len() / 2 < need {
                 if !self.decode_more() {
@@ -241,6 +262,7 @@ impl Voice {
             if at + 1 >= n && self.done {
                 self.cur_left = tl;
                 self.cur_right = tr;
+                self.cur_hz = th;
                 return false;
             }
             let frac = (self.pos - at as f64) as f32;
@@ -250,12 +272,27 @@ impl Voice {
             let t = i as f32 / frames as f32;
             let gl = sl + (tl - sl) * t;
             let gr = sr + (tr - sr) * t;
-            out[i * 2] += (l0 + (l1 - l0) * frac) * gl;
-            out[i * 2 + 1] += (r0 + (r1 - r0) * frac) * gr;
+            let mut s = [l0 + (l1 - l0) * frac, r0 + (r1 - r0) * frac];
+            if filtered {
+                for (x, f) in s.iter_mut().zip(self.filter.iter_mut()) {
+                    let v3 = *x - f[1];
+                    let v1 = a1 * f[0] + a2 * v3;
+                    let v2 = f[1] + a2 * f[0] + a3 * v3;
+                    f[0] = 2.0 * v1 - f[0];
+                    f[1] = 2.0 * v2 - f[1];
+                    *x = v2;
+                }
+            }
+            out[i * 2] += s[0] * gl;
+            out[i * 2 + 1] += s[1] * gr;
             self.pos += step;
         }
         self.cur_left = tl;
         self.cur_right = tr;
+        self.cur_hz = th;
+        if !filtered {
+            self.filter = [[0.0; 2]; 2];
+        }
         // (what has been played is dropped from the front now and then)
         let used = self.pos as usize;
         if used > 16_384 {
@@ -329,7 +366,7 @@ struct Player {
     // the newest MPLAY of each slot: a file still loading for an older one is dropped
     gens: HashMap<String, u32>,
     // loudness told before the file was ready
-    early: HashMap<String, (f32, f32)>,
+    early: HashMap<String, (f32, f32, f32)>,
     seq: u32,
     out: Option<Output>,
     idle_since: Instant,
@@ -367,11 +404,13 @@ impl Player {
                 if let (Some(slot), Some(l), Some(r)) = (p.next(), p.next(), p.next()) {
                     let slot = slot_name(slot);
                     let (l, r) = (l.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0), r.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0));
+                    let hz = p.next().and_then(|h| h.parse::<f32>().ok()).filter(|h| *h > 0.0 && *h < OPEN_HZ).unwrap_or(OPEN_HZ).max(20.0);
                     if let Some(v) = self.voices.get_mut(&slot) {
                         v.left = l;
                         v.right = r;
+                        v.hz = hz;
                     } else {
-                        self.early.insert(slot, (l, r));
+                        self.early.insert(slot, (l, r, hz));
                     }
                 }
             }
@@ -386,16 +425,22 @@ impl Player {
                 self.gens.clear();
                 self.early.clear();
             }
-            // MTEST <ms> <path>: two seconds from `ms` on decoded into memory (nothing is
-            // heard) -> MTEST path rms
+            // MTEST <ms>[@hz] <path>: two seconds from `ms` on decoded into memory (nothing is
+            // heard), through the filter at `hz` when given -> MTEST path rms
             "MTEST" => {
                 let mut p = arg.splitn(2, ' ');
                 if let (Some(ms), Some(path)) = (p.next(), p.next()) {
+                    let (ms, hz) = ms.split_once('@').unwrap_or((ms, ""));
                     let ms: u64 = ms.parse().unwrap_or(0);
+                    let hz: f32 = hz.parse().unwrap_or(0.0);
                     let path = path.trim().to_string();
                     std::thread::spawn(move || {
                         let rms = catch_unwind(AssertUnwindSafe(|| {
                             let mut v = Voice::load(&path, ms).ok()?;
+                            if hz > 0.0 {
+                                v.hz = hz;
+                                v.cur_hz = hz;
+                            }
                             v.left = 1.0;
                             v.right = 1.0;
                             v.cur_left = 1.0;
@@ -478,11 +523,13 @@ impl Player {
         if self.gens.get(&slot) != Some(&gen) {
             return; // stopped or replaced while it was loading
         }
-        if let Some((l, r)) = self.early.remove(&slot) {
+        if let Some((l, r, hz)) = self.early.remove(&slot) {
             v.left = l;
             v.right = r;
             v.cur_left = l;
             v.cur_right = r;
+            v.hz = hz;
+            v.cur_hz = hz;
         }
         self.voices.insert(slot, v);
     }

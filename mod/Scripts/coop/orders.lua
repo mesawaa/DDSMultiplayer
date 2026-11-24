@@ -1,4 +1,4 @@
--- The task list at the left of the screen, sorted (EXPERIMENTAL: DeliveryList).
+-- The task list at the left of the screen, sorted (TWEAKS: DeliveryList).
 --
 -- The game's list (it slides in when a task is new, while Tab is held, with the phone up
 -- and at a work station) shows the open tasks in the order they came, twelve at most. With
@@ -693,7 +693,7 @@ Core.onTick(function()
     end
 end)
 
--- (the switch on the EXPERIMENTAL page)
+-- (the switch on the TWEAKS page)
 function Orders.apply() Orders.refresh() end
 
 function Orders.shutdown() shown, holder, label = nil, nil, nil end

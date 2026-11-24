@@ -3,8 +3,8 @@
 -- On the raised floor north of the card table: seven tiles across, six deep, from the
 -- railing's corner back to the card table's end (the lounge's third pair of sofas and the
 -- table between them stood there; the card room takes them away). The floor is a chess
--- board: black tiles and white ones. For a player who has switched DANCE FLOOR LIGHTS on
--- (MOD OPTIONS, EXPERIMENTAL) the white ones light up in colours that change in slow
+-- board: black tiles and white ones. For a player who has switched Dance floor lights on
+-- (MOD OPTIONS, TWEAKS) the white ones light up in colours that change in slow
 -- patterns as soon as somebody stands on the floor, and go white again when the last one
 -- has stepped off; a lamp above takes the colour of the moment. Every game builds its own
 -- copy and runs its own patterns, nothing of it is saved. It follows the card room's

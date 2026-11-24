@@ -1,14 +1,17 @@
 -- The music addon (an optional download of its own: this file and bin/ddsmp_audio.dll), on
 -- whenever it is installed: the player's own music files (mp3, wav) in the mod's Music
 -- folder join the game's music: the street music of the city's areas and the club's. Files
--- in a folder named after an area ("Stink", "Bad asia", ...) play in that area only.
+-- in a folder named after an area ("Stink", "Bad asia", ...) play in that area only. A
+-- folder with any other name ("Audio") is one row of the MUSIC page: all its files play
+-- in the areas chosen for the folder there.
 --
 -- The game cannot load a sound file while it runs, so the addon's DLL (audio-addon in the
 -- source) decodes and plays them; this module places the sound: each area plays one
 -- track at a time on one of its street speakers (musicAreaPlaylist), and a track of ours
--- that an area picks is heard from that speaker, as loud as the game's own would be there
--- (the speaker's own fall-off, the area's loudness, the game's music volume), louder in the
--- ear on the speaker's side.
+-- that an area picks is heard from that speaker, as the game's own would be there: as loud
+-- (the speaker's own fall-off, the area's loudness, the game's music volume), as muffled
+-- (the speaker's filter, which takes the high notes away with distance and behind a wall),
+-- louder in the ear on the speaker's side.
 --
 -- Nothing of the game's is replaced: when an area starts a track, one of ours takes its
 -- place with the chance one more track in its list would have. Each track can be given to
@@ -183,7 +186,7 @@ end
 -- the host's (guests), areas = list of area ids or nil (all) for the host's }
 local own = { list = {}, byId = {} }
 local host = { list = {}, byId = {}, pages = nil }
--- areas: file -> area ids; len: id -> ms; volume: the slider, 0..1; replace: REPLACE THE
+-- areas: file, or folder with "/" at its end -> area ids; len: id -> ms; volume: the slider, 0..1; replace: REPLACE THE
 -- GAME'S MUSIC
 local settings = { areas = {}, len = {}, volume = DEFAULT_VOLUME, replace = false }
 
@@ -213,7 +216,8 @@ local function saveSettings()
 end
 
 -- "Stink/a.mp3": the area of the folder (nil for a file not in a folder; false for a
--- folder that names no area).
+-- folder that names no area: a folder of the player's own, whose areas are chosen on the
+-- MUSIC page).
 local function folderOf(name)
     local dir = tostring(name or ""):match("^(.-)/")
     if not dir then return nil end
@@ -221,10 +225,16 @@ local function folderOf(name)
 end
 Music.folderOf = folderOf
 
+-- What the areas of a file are kept under: the file's own name, or its folder's ("Audio/").
+local function areasKey(e)
+    if e.folder == false then return (e.name:match("^(.-)/") or "") .. "/" end
+    return e.name
+end
+
 local function areasOf(e)
     if e.folder then return { e.folder } end
     if e.host then return e.areas end
-    local a = settings.areas[e.name]
+    local a = settings.areas[areasKey(e)]
     return type(a) == "table" and a or nil
 end
 Music.areasOf = areasOf
@@ -247,7 +257,7 @@ function Music.pool(areaId, ownOnly)
     if not on() then return mixed, false end
     local replace = settings.replace == true
     local function add(e)
-        if seen[e.id] or not playable(e) or e.folder == false then return end
+        if seen[e.id] or not playable(e) then return end
         if e.folder then
             if e.folder == areaId then only[#only + 1] = e end
         elseif inArea(e, areaId) then
@@ -290,7 +300,7 @@ function Music.hostTracks()
     if not on() then return out end
     local list = World.role == "guest" and host.list or own.list
     for _, e in ipairs(list) do
-        if type(e.ms) == "number" and e.ms > 5000 and e.folder ~= false then out[#out + 1] = { id = e.id, title = songTitle(e.name), ms = e.ms } end
+        if type(e.ms) == "number" and e.ms > 5000 then out[#out + 1] = { id = e.id, title = songTitle(e.name), ms = e.ms } end
     end
     return out
 end
@@ -439,9 +449,17 @@ local function readVolume()
     end
 end
 
--- How far a speaker carries: full loudness within `inner`, none past inner + falloff.
+-- How a speaker is heard, as the game has set it up: full loudness within `inner`, none
+-- past inner + falloff, and between them the curve of `model` (the engine's distance
+-- models); `lpf`: the filter that muffles with distance (at `r0` and nearer everything under
+-- `f0` Hz is heard, from `r1` on only what is under `f1`); `occ`: behind something, only
+-- what is under `hz` and `vol` times as loud, changing over `time` seconds.
+local LINEAR, LOGARITHMIC, INVERSE, LOG_REVERSE, NATURAL = 0, 1, 2, 3, 4
+local OPEN_HZ = 19000          -- (from here up: no filter)
+
 local function attenuationOf(ac)
-    local inner, falloff = 400, 3600
+    local att = { inner = 400, falloff = 3600, model = LINEAR, db = -60 }
+    if not ac then return att end
     pcall(function()
         local s = nil
         if ac.bOverrideAttenuation then
@@ -451,18 +469,72 @@ local function attenuationOf(ac)
         elseif valid(ac.Sound) and valid(ac.Sound.AttenuationSettings) then
             s = ac.Sound.AttenuationSettings.Attenuation
         end
-        if s then
-            local i, f = s.AttenuationShapeExtents.X, s.FalloffDistance
-            if type(i) == "number" and i >= 0 then inner = i end
-            if type(f) == "number" and f > 0 then falloff = f end
-        end
+        if not s then return end
+        local i, f = s.AttenuationShapeExtents.X, s.FalloffDistance
+        if type(i) == "number" and i >= 0 then att.inner = i end
+        if type(f) == "number" and f > 0 then att.falloff = f end
+        pcall(function()
+            local m, db = tonumber(s.DistanceAlgorithm), s.dBAttenuationAtMax
+            if m and m >= LINEAR and m <= NATURAL then att.model = math.floor(m) end
+            if type(db) == "number" and db < 0 then att.db = db end
+        end)
+        pcall(function()
+            if s.bAttenuateWithLPF ~= true then return end
+            local r0, r1, f0, f1 = s.LPFRadiusMin, s.LPFRadiusMax, s.LPFFrequencyAtMin, s.LPFFrequencyAtMax
+            if type(r0) == "number" and type(r1) == "number" and type(f0) == "number" and type(f1) == "number" and f0 > 0 and f1 > 0 then
+                att.lpf = { r0 = r0, r1 = math.max(r1, r0 + 1), f0 = f0, f1 = f1 }
+            end
+        end)
+        pcall(function()
+            if s.bEnableOcclusion ~= true then return end
+            local hz, vol, time = s.OcclusionLowPassFilterFrequency, s.OcclusionVolumeAttenuation, s.OcclusionInterpolationTime
+            if type(hz) == "number" and hz > 0 and type(vol) == "number" then
+                att.occ = { hz = hz, vol = math.max(0, math.min(1, vol)), time = type(time) == "number" and time or 0.5 }
+            end
+        end)
     end)
-    return inner, falloff
+    return att
 end
 Music.attenuationOf = attenuationOf
 
--- voice: { slot, entry, x, y, z, inner, falloff, base, fadeFrom, fadeTo, fadeAt, fadeFor,
--- startedAt, l, r, stopAt }
+-- How loud (0..1) a speaker is at `d` from it.
+local function nearness(att, d)
+    local x = (d - att.inner) / att.falloff
+    if x <= 0 then return 1 end
+    if x >= 1 then return 0 end
+    local n
+    if att.model == LOGARITHMIC then n = -0.5 * math.log(x)
+    elseif att.model == INVERSE then n = 0.02 / x
+    elseif att.model == LOG_REVERSE then n = 1 + 0.5 * math.log(1 - x)
+    elseif att.model == NATURAL then n = 10 ^ (x * att.db / 20)
+    else n = 1 - x end
+    return math.max(0, math.min(1, n))
+end
+Music.nearness = nearness
+
+-- Up to which frequency a speaker is heard at `d` from it (OPEN_HZ: all of it).
+local function distanceHz(att, d)
+    local f = att.lpf
+    if not f then return OPEN_HZ end
+    local t = math.max(0, math.min(1, (d - f.r0) / (f.r1 - f.r0)))
+    return math.min(OPEN_HZ, f.f0 + (f.f1 - f.f0) * t)
+end
+Music.distanceHz = distanceHz
+
+-- True when something stands between the listener and a place.
+local KSL = nil
+local TRACE_RED, TRACE_GREEN = { R = 1, G = 0, B = 0, A = 1 }, { R = 0, G = 1, B = 0, A = 1 }
+local function hidden(player, from, to)
+    KSL = KSL or StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+    local hit = {}
+    local ok, yes = pcall(function()
+        return KSL:LineTraceSingle(player, from, to, 0, false, {}, 0, hit, true, TRACE_RED, TRACE_GREEN, 0)
+    end)
+    return ok and yes == true
+end
+
+-- voice: { slot, entry, x, y, z, att (attenuationOf), base, fadeFrom, fadeTo, fadeAt,
+-- fadeFor, startedAt, l, r, hz, stopAt, occ (0..1: how far behind something), occTo, occAt }
 local voices = {}
 
 local function fadeValue(v, now)
@@ -476,14 +548,13 @@ local function setFade(v, to, seconds)
     v.fadeFrom, v.fadeTo, v.fadeAt, v.fadeFor = fadeValue(v, now), to, now, seconds
 end
 
--- Starts `entry` on `slot` at `offset` seconds, heard from `place` ({ x, y, z, inner,
--- falloff, base }).
+-- Starts `entry` on `slot` at `offset` seconds, heard from `place` ({ x, y, z, att, base }).
 local function startVoice(slot, entry, offset, place, fadeIn)
     if not playable(entry) then return false end
     offset = math.max(0, offset or 0)
     if offset * 1000 >= entry.ms - 1000 then return false end
-    local v = { slot = slot, entry = entry, startedAt = os.clock() - offset, l = -1, r = -1,
-        x = place.x, y = place.y, z = place.z, inner = place.inner or 400, falloff = place.falloff or 3600,
+    local v = { slot = slot, entry = entry, startedAt = os.clock() - offset, l = -1, r = -1, hz = -1,
+        x = place.x, y = place.y, z = place.z, att = place.att or attenuationOf(nil),
         base = place.base or 0.3, fadeFrom = 0, fadeTo = 1, fadeAt = os.clock(), fadeFor = fadeIn or 0 }
     voices[slot] = v
     cmd(string.format("MPLAY %s %d %s", slot, math.floor(offset * 1000), entry.path))
@@ -525,6 +596,8 @@ local function placeVoices()
     pcall(function() paused = Core.statics():IsGamePaused(World.player()) == true end)
     local yaw = math.rad(listener.yaw or 0)
     local rx, ry = -math.sin(yaw), math.cos(yaw)
+    local dt = math.max(0, math.min(0.5, now - (listener.placed or now)))
+    listener.placed = now
     for slot, v in pairs(voices) do
         if v.stopAt and now >= v.stopAt then
             voices[slot] = nil
@@ -532,8 +605,28 @@ local function placeVoices()
         else
             local dx, dy, dz = v.x - listener.x, v.y - listener.y, v.z - listener.z
             local d = math.sqrt(dx * dx + dy * dy + dz * dz)
-            local near = 1
-            if d > v.inner then near = math.max(0, 1 - (d - v.inner) / v.falloff) end
+            local att = v.att
+            local near, hz = nearness(att, d), distanceHz(att, d)
+            -- (behind a wall: looked at twice a second while the speaker is in earshot)
+            local occ = att.occ
+            if occ then
+                if near > 0 and now - (v.occAt or -100) > 0.5 then
+                    v.occAt = now
+                    local player = World.player()
+                    v.occTo = (player and hidden(player, { X = listener.x, Y = listener.y, Z = listener.z }, { X = v.x, Y = v.y, Z = v.z })) and 1 or 0
+                    if v.occ == nil then v.occ = v.occTo end
+                end
+                local at, to = v.occ or 0, v.occTo or 0
+                if at ~= to then
+                    local step = occ.time > 0 and dt / occ.time or 1
+                    at = to > at and math.min(to, at + step) or math.max(to, at - step)
+                    v.occ = at
+                end
+                if at > 0 then
+                    near = near * (1 + (occ.vol - 1) * at)
+                    hz = math.min(hz, OPEN_HZ * (occ.hz / OPEN_HZ) ^ at)
+                end
+            end
             local gain = (v.base or 0.3) * near * fadeValue(v, now) * volume.music * (volume.class or 1) * Music.LEVEL * settings.volume * settings.volume
             if paused then gain = 0 end
             -- (louder in the ear on the speaker's side; close by, from all around)
@@ -545,9 +638,9 @@ local function placeVoices()
             local theta = (side + 1) * math.pi / 4
             local l = math.min(1, gain * math.cos(theta))
             local r = math.min(1, gain * math.sin(theta))
-            if math.abs(l - v.l) > 0.003 or math.abs(r - v.r) > 0.003 then
-                v.l, v.r = l, r
-                cmd(string.format("MVOL %s %.4f %.4f", slot, l, r))
+            if math.abs(l - v.l) > 0.003 or math.abs(r - v.r) > 0.003 or math.abs(hz - v.hz) > v.hz * 0.02 then
+                v.l, v.r, v.hz = l, r, hz
+                cmd(string.format("MVOL %s %.4f %.4f %d", slot, l, r, math.floor(hz + 0.5)))
             end
         end
     end
@@ -638,16 +731,17 @@ local function takeOver(rec)
     end)
     if not valid(speaker) or not valid(ac) then return end
     local l = speaker:K2_GetActorLocation()
-    local inner, falloff = attenuationOf(ac)
+    local att = attenuationOf(ac)
     local base = 0.3
     pcall(function() if type(a.randVolume) == "number" and a.randVolume > 0 then base = a.randVolume end end)
     pcall(function() ac:Stop() end)
     local slot = slotOf(rec.id)
-    if not startVoice(slot, entry, 0, { x = l.X, y = l.Y, z = l.Z, inner = inner, falloff = falloff, base = base }, 3) then return end
+    if not startVoice(slot, entry, 0, { x = l.X, y = l.Y, z = l.Z, att = att, base = base }, 3) then return end
     s.custom = { slot = slot, entry = entry, ac = ac, endsAt = os.clock() + entry.ms / 1000 - 2 }
     table.insert(s.recent, 1, entry.id)
     while #s.recent > 3 do table.remove(s.recent) end
-    log("Music: %s plays %s (%s, falloff %d+%d)", rec.id, entry.name, clock(entry.ms), math.floor(inner), math.floor(falloff))
+    log("Music: %s plays %s (%s, falloff %d+%d, model %d%s%s)", rec.id, entry.name, clock(entry.ms), math.floor(att.inner), math.floor(att.falloff), att.model,
+        att.lpf and string.format(", filter %d-%d Hz", math.floor(att.lpf.f0), math.floor(att.lpf.f1)) or "", att.occ and ", walls" or "")
     ended[slot] = function()
         local st = state[rec.address]
         if st and st.custom and st.custom.slot == slot then
@@ -732,7 +826,7 @@ function Music.playClub(id, offset, speaker, base)
         local owner = speaker:GetOwner()
         local l = valid(owner) and owner:K2_GetActorLocation() or speaker:K2_GetComponentLocation()
         place.x, place.y, place.z = l.X, l.Y, l.Z
-        place.inner, place.falloff = attenuationOf(speaker)
+        place.att = attenuationOf(speaker)
     end)
     if not ok then return false end
     return startVoice("club", e, offset, place, 0.5)
@@ -748,7 +842,7 @@ local function sendLibrary(target)
     local list = {}
     if on() then
         for _, e in ipairs(own.list) do
-            if type(e.ms) == "number" and e.ms > 5000 and e.folder ~= false then
+            if type(e.ms) == "number" and e.ms > 5000 then
                 list[#list + 1] = { n = e.name, s = e.size, m = e.ms, a = (not e.folder) and areasOf(e) or nil }
             end
         end
@@ -917,7 +1011,7 @@ end
 ---------------------------------------------------------------- the MUSIC page of MOD OPTIONS
 
 local page = nil          -- the ui of the page while it shows
-local expanded = nil      -- the file whose areas are shown
+local expanded = nil      -- the file (or folder, "Audio/") whose areas are shown
 
 function Music.refreshPage()
     if page and page.render then
@@ -936,7 +1030,7 @@ local function setAreas(e, list)
         end
         if all then list = nil end
     end
-    settings.areas[e.name] = list
+    settings.areas[areasKey(e)] = list
     saveSettings()
     announce()
 end
@@ -959,6 +1053,7 @@ function Music.page(ui)
     page = ui
     local scr, inner = ui.scr, ui.inner
     local folder = DIR:gsub("/", "\\")
+    ui.group(inner, "GENERAL", nil, true)
     local open = scr.button("OPEN FOLDER", nil, function() cmd("MOPEN " .. folder) end)
     local again = scr.button("RESCAN", nil, function() Music.rescan() end)
     local short = folder:match("([^\\]+\\[^\\]+\\[^\\]+)$") or folder
@@ -994,66 +1089,91 @@ function Music.page(ui)
         ui.emptyLine(inner, "No mp3 or wav files in the folder.")
         return
     end
-    for _, e in ipairs(own.list) do
-        local sub, color = nil, nil
-        local dir = e.name:match("^(.-)/")
-        if e.ms == nil then
-            sub = "Reading..."
-        elseif e.ms <= 5000 then
-            sub, color = "Cannot be played", ui.YELLOW
-        elseif e.folder == false then
-            sub, color = string.format('No area is called "%s": the folder plays nowhere', dir), ui.YELLOW
-        elseif e.folder then
-            local info = AREA_BY_ID[e.folder]
-            sub = string.format("%s   %s only (folder %s)", clock(e.ms), info.name:sub(1, 1) .. info.name:sub(2):lower(), dir)
-        else
-            sub = clock(e.ms) .. "   " .. areaNames(e)
-        end
-        if e.folder ~= nil then
-            -- (a folder decides the area: no buttons)
-            ui.row(inner, title(e.name), sub, {}, color)
-            goto continue
-        end
+    -- ALL AREAS and AREAS for a file or a folder of the player's own, and the areas in a
+    -- panel of their own under its row while AREAS is open: five to a line, in columns of
+    -- one width. `e`: the file, or any file of the folder.
+    local function areaRow(e, name, sub, color)
+        local key = areasKey(e)
         local all = areasOf(e) == nil
         local bAll = scr.button("ALL AREAS", nil, function()
             setAreas(e, nil)
             ui.render()
         end)
         scr.tint(bAll, all and Screen.GREEN or Screen.WHITE)
-        local bPick = scr.button(expanded == e.name and "CLOSE" or "AREAS", nil, function()
-            expanded = expanded ~= e.name and e.name or nil
+        local bPick = scr.button(expanded == key and "CLOSE" or "AREAS", nil, function()
+            expanded = expanded ~= key and key or nil
             ui.render()
         end)
-        ui.row(inner, title(e.name), sub, { bAll.widget, bPick.widget }, color)
-        if expanded == e.name then
-            -- the areas in a panel of their own under the track: five to a line, in columns
-            -- of one width
-            local lines = scr.new("VerticalBox")
-            local line = nil
-            for i, a in ipairs(Music.AREAS) do
-                if (i - 1) % 5 == 0 then
-                    line = scr.new("HorizontalBox")
-                    lines:AddChildToVerticalBox(line):SetPadding({ Left = 0, Top = i > 1 and 4 or 0, Right = 0, Bottom = 0 })
-                end
-                local isOn = inArea(e, a.id)
-                local b = scr.button(a.name, nil, function()
-                    local list = {}
-                    for _, other in ipairs(Music.AREAS) do
-                        local keep = inArea(e, other.id)
-                        if other.id == a.id then keep = not isOn end
-                        if keep then list[#list + 1] = other.id end
-                    end
-                    setAreas(e, list)
-                    ui.render()
-                end)
-                scr.tint(b, isOn and Screen.GREEN or Screen.GREY)
-                local slot = line:AddChildToHorizontalBox(b.widget)
-                slot:SetSize({ SizeRule = 1, Value = 1 })
-                slot:SetHorizontalAlignment(1)
+        ui.row(inner, name, sub, { bAll.widget, bPick.widget }, color)
+        if expanded ~= key then return end
+        local lines = scr.new("VerticalBox")
+        local line = nil
+        for i, a in ipairs(Music.AREAS) do
+            if (i - 1) % 5 == 0 then
+                line = scr.new("HorizontalBox")
+                lines:AddChildToVerticalBox(line):SetPadding({ Left = 0, Top = i > 1 and 4 or 0, Right = 0, Bottom = 0 })
             end
-            if ui.panel then ui.panel(lines) else ui.put(inner, lines, 6) end
+            local isOn = inArea(e, a.id)
+            local b = scr.button(a.name, nil, function()
+                local list = {}
+                for _, other in ipairs(Music.AREAS) do
+                    local keep = inArea(e, other.id)
+                    if other.id == a.id then keep = not isOn end
+                    if keep then list[#list + 1] = other.id end
+                end
+                setAreas(e, list)
+                ui.render()
+            end)
+            scr.tint(b, isOn and Screen.GREEN or Screen.GREY)
+            local slot = line:AddChildToHorizontalBox(b.widget)
+            slot:SetSize({ SizeRule = 1, Value = 1 })
+            slot:SetHorizontalAlignment(1)
         end
-        ::continue::
+        if ui.panel then ui.panel(lines) else ui.put(inner, lines, 6) end
+    end
+
+    -- the folders, each one row: how many songs, how long together, and where they play
+    local folders, byDir, loose = {}, {}, {}
+    for _, e in ipairs(own.list) do
+        local dir = e.name:match("^(.-)/")
+        if e.folder == nil or not dir then
+            loose[#loose + 1] = e
+        else
+            local f = byDir[dir]
+            if not f then
+                f = { dir = dir, first = e, songs = 0, ms = 0, reading = 0, bad = 0 }
+                byDir[dir] = f
+                folders[#folders + 1] = f
+            end
+            if e.ms == nil then f.reading = f.reading + 1
+            elseif e.ms <= 5000 then f.bad = f.bad + 1
+            else f.songs, f.ms = f.songs + 1, f.ms + e.ms end
+        end
+    end
+    if #folders > 0 then ui.group(inner, "FOLDERS", nil, false) end
+    for _, f in ipairs(folders) do
+        local e = f.first
+        local sub = string.format("%d %s   %s", f.songs, f.songs == 1 and "song" or "songs", clock(f.ms))
+        if f.reading > 0 then sub = sub .. string.format("   reading %d more...", f.reading) end
+        if f.bad > 0 then sub = sub .. string.format("   %d cannot be played", f.bad) end
+        local name = title(f.dir):upper()
+        if e.folder then
+            -- (a folder named after an area: that area, nothing to choose)
+            local info = AREA_BY_ID[e.folder]
+            ui.row(inner, name, sub .. "   " .. info.name:sub(1, 1) .. info.name:sub(2):lower() .. " only", {})
+        else
+            areaRow(e, name, sub .. "   " .. areaNames(e))
+        end
+    end
+    if #loose > 0 then ui.group(inner, "SONGS", nil, false) end
+    for _, e in ipairs(loose) do
+        if e.ms == nil then
+            ui.row(inner, title(e.name), "Reading...", {})
+        elseif e.ms <= 5000 then
+            ui.row(inner, title(e.name), "Cannot be played", {}, ui.YELLOW)
+        else
+            areaRow(e, title(e.name), clock(e.ms) .. "   " .. areaNames(e))
+        end
     end
 end
 
@@ -1090,7 +1210,8 @@ end)
 function Music.debug()
     local out = {}
     for slot, v in pairs(voices) do
-        out[slot] = { file = v.entry.name, at = os.clock() - v.startedAt, l = v.l, r = v.r, x = v.x, y = v.y, z = v.z, inner = v.inner, falloff = v.falloff, base = v.base }
+        out[slot] = { file = v.entry.name, at = os.clock() - v.startedAt, l = v.l, r = v.r, hz = v.hz, occ = v.occ, x = v.x, y = v.y, z = v.z, inner = v.att.inner, falloff = v.att.falloff,
+            model = v.att.model, lpf = v.att.lpf, base = v.base }
     end
     return out, { own = #own.list, host = #host.list, download = download and download.e.name or nil, music = volume.music, class = volume.class }
 end

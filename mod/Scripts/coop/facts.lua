@@ -278,9 +278,99 @@ local function tendAtms(q)
     end
 end
 
+---------------------------------------------------------------- what the story unlocks on the player
+
+-- Furniture mode, the work station, spraying and waiting are switches on the player
+-- character, and the story sets each of them only on the player of the game that runs the
+-- step (furniture mode: the game in which the first hideout is rented). They are saved
+-- with the host's character, which is also what a guest's character starts from. So a
+-- hideout rented by one player left the others without furniture mode, and when the host
+-- was not the one who rented, the world was saved without it for everybody. In a shared
+-- world a switch any player has is everybody's: each game says which ones its player has,
+-- the host puts them together and says so to all. Furniture mode also follows the world
+-- itself: with any rented hideout it is on (in every game, also alone), which puts right a
+-- world that was saved without it.
+local UNLOCKS = { "appartmentModeAvailable", "workStationAvailable", "sprayingAvailable", "sleepingWaitingAvailable" }
+local AREA = "/Game/Interactive/rentAppartmentArea.rentAppartmentArea_C"
+local unlock = { world = 0, guests = {}, sent = nil, sentAt = 0, rentedAt = 0 }
+
+local function ownUnlocks(player)
+    local bits = 0
+    for i, name in ipairs(UNLOCKS) do
+        if player[name] == true then bits = bits | (1 << (i - 1)) end
+    end
+    return bits
+end
+
+local function anyRented()
+    for _, a in ipairs(Core.actors(AREA) or {}) do
+        local ok, yes = pcall(function() return a.areaRented == true and a.areaForever ~= true end)
+        if ok and yes then return true end
+    end
+    return false
+end
+
+local function tendUnlocks()
+    local player = Core.player()
+    if not player then return end
+    local own = ownUnlocks(player)
+    local want = own
+    if own & 1 == 0 and os.clock() - unlock.rentedAt >= 5 then
+        unlock.rentedAt = os.clock()
+        if anyRented() then want = want | 1 end
+    end
+    local shared = World.active and World.shared()
+    if shared then
+        want = want | unlock.world
+        if World.role == "host" then
+            for id, bits in pairs(unlock.guests) do
+                if World.inWorld[id] then want = want | bits end
+            end
+        end
+    end
+    if want ~= own then
+        for i, name in ipairs(UNLOCKS) do
+            local bit = 1 << (i - 1)
+            if want & bit ~= 0 and own & bit == 0 then
+                player[name] = true
+                Facts.stats.unlocks = (Facts.stats.unlocks or 0) + 1
+                log("Facts: %s is switched on for this player (the world has it)", name)
+            end
+        end
+    end
+    if not shared then return end
+    local now = os.clock()
+    if unlock.sent ~= want or now - unlock.sentAt > 10 then
+        unlock.sent, unlock.sentAt = want, now
+        if World.role == "host" then
+            for id in pairs(World.inWorld) do Net.send("unw", { b = want }, id) end
+        else
+            Net.send("uno", { b = want }, World.host or Net.S.owner)
+        end
+    end
+end
+
+Net.on("uno", function(sender, data)
+    if World.role ~= "host" or not World.inWorld[sender] or type(data) ~= "table" then return end
+    unlock.guests[sender] = math.tointeger(tonumber(data.b) or 0) or 0
+end)
+
+Net.on("unw", function(sender, data)
+    if World.role ~= "guest" or sender ~= (World.host or Net.S.owner) or type(data) ~= "table" then return end
+    unlock.world = math.tointeger(tonumber(data.b) or 0) or 0
+end)
+
+World.listen("peerleft", function(id) unlock.guests[id] = nil end)
+
+Core.every(2, function()
+    local ok, e = pcall(tendUnlocks)
+    if not ok then log("Facts: %s", tostring(e)) end
+end)
+
 ---------------------------------------------------------------- lifecycle
 
 local function reset()
+    unlock = { world = 0, guests = {}, sent = nil, sentAt = 0, rentedAt = 0 }
     sectorC = { addr = nil, since = nil, done = nil }
     atm.addr, atm.done, atm.at = nil, false, 0
     ballena = { own = false, borrowed = false, mark = nil, world = false, guests = {}, sentOwn = nil, sentAt = 0, sentWorld = nil, told = false }

@@ -143,7 +143,17 @@ local function hideArms(r, player)
     end)
 end
 
-local function leave(giveViewBack)
+-- The phone is an actor of its own in the hand of the first-person body, and hiding or
+-- showing that body does the same to the phone.
+local function showPhone(player, show)
+    pcall(function()
+        local root = player.phoneRef.DefaultSceneRoot
+        if valid(root) then root:SetVisibility(show, true) end
+    end)
+end
+
+-- `quick`: the way back to the head is short (the phone comes up: its hand is already rising)
+local function leave(giveViewBack, quick)
     local r = rig
     rig = nil
     if not r then return end
@@ -151,11 +161,14 @@ local function leave(giveViewBack)
     if World.gone then return end
     local player = World.player()
     local same = player and address(player) == r.owner
+    local blend = quick and 0.1 or 0.2
     pcall(function()
         if same and giveViewBack and viewTarget(r.pc) == r.cameraAddr then
-            r.pc:SetViewTargetWithBlend(player, 0.2, 0, 0, false)
+            r.pc:SetViewTargetWithBlend(player, blend, 0, 0, false)
         end
     end)
+    -- (the phone, which the game has just shown, waits for the hand that holds it)
+    if same and r.arms then showPhone(player, false) end
     pcall(function() if valid(r.pc) then r.pc:K2_DetachFromActor(1, 1, 1) end end)
     local camera, figure = r.camera, r.figure
     -- The game's first-person body (a whole figure, of which the player sees the arms) is
@@ -169,7 +182,10 @@ local function leave(giveViewBack)
         end
         pcall(function()
             local now = World.player()
-            if now and address(now) == r.owner then now.fpsArms:SetVisibility(true, true) end
+            if now and address(now) == r.owner then
+                now.fpsArms:SetVisibility(true, true)
+                showPhone(now, now.phoneUp == true)
+            end
         end)
     end
     local function clear()
@@ -179,7 +195,7 @@ local function leave(giveViewBack)
         pcall(function() if valid(camera) then camera:K2_DestroyActor() end end)
     end
     -- (the view is still on its way back to the head)
-    if same and giveViewBack then Core.after(0.25, clear) else clear() end
+    if same and giveViewBack then Core.after(blend + 0.05, clear) else clear() end
 end
 
 local function enter(player)
@@ -238,7 +254,7 @@ Core.onTick(function(dt)
         return
     end
     if not wanted(player) then
-        leave(true)
+        leave(true, player.phoneUp == true)
         return
     end
     local ok, e = xpcall(function()

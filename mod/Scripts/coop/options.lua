@@ -1,19 +1,23 @@
 -- MOD OPTIONS: the mod's own screen for getting a game unstuck, in the game.
 --
 -- Opened from the pause menu (its MOD OPTIONS entry) or with ModOptionsKey, always on
--- SETTINGS. Four pages:
+-- SETTINGS. Its pages:
 --
 --   SETTINGS  the settings of config.lua, written into that file. Most take effect at
 --             once; the Sync switches after a restart (every player should have the same).
 --   REPAIR    dealers and clients that stopped answering are put right (coop/clients.lua);
 --             draw jars, boxes and bags again; ask for the whole shared state again (a
 --             guest from the host, the host for every guest); UNSTUCK, a stuck player
---             moved to the nearest open ground.
---   QUESTS    the open story steps (and the step of Olivia's wall), each with RELOAD: the
---             step is set up again so that the player can do it (Eddie back on his bench,
---             the first package back in the player's own dead drop, the first clients'
---             orders asked for again, the ATMs switched on, the marker, the task list).
---             Nothing is completed, so nobody is asked.
+--             moved to the nearest open ground. Under these, QUESTS: the open story steps
+--             (and the step of Olivia's wall), each with RELOAD: the step is set up again
+--             so that the player can do it (Eddie back on his bench, the first package
+--             back in the player's own dead drop, the first clients' orders asked for
+--             again, the ATMs switched on, the marker, the task list). Nothing is
+--             completed, so nobody is asked.
+--   TWEAKS    changes to how the game plays that a player may want or not, each with its
+--             switch (the list of coop/experimental.lua, kept like EXPERIMENTAL's).
+--
+-- Every page's rows stand under group titles (GENERAL, QUESTS, MISC, ...).
 --   EXPERIMENTAL  the features that are not fully tested yet (coop/experimental.lua),
 --             each with its switch, off until the player switches it on; kept in
 --             the Experimental table of config.lua.
@@ -546,9 +550,10 @@ local function emptyLine(inner, text)
 end
 
 
--- QUESTS: every open story step with RELOAD, which sets the step up again for the player
--- to do (nothing is completed, so nobody is asked).
+-- QUESTS, the last part of REPAIR: every open story step with RELOAD, which sets the step
+-- up again for the player to do (nothing is completed, so nobody is asked).
 local function reloadPage(inner)
+    group(inner, "QUESTS", nil, false)
     local any = false
     local function reloaded(name, done)
         local what = (done and #done > 0) and (": " .. table.concat(done, ", ")) or ""
@@ -578,6 +583,7 @@ local function reloadPage(inner)
 end
 
 local function repairPage(inner)
+    group(inner, "GENERAL", nil, true)
     local redraw = scr.button("REDRAW", nil, function()
         local n = Sync.redrawAll()
         pcall(Hud.toast, string.format("%d jars, boxes and bags drawn again", n), 4)
@@ -604,6 +610,7 @@ local function repairPage(inner)
         Core.after(0.1, unstuck)
     end)
     row(inner, "Unstuck: move to the nearest open, flat ground", "Press again to go further", { move.widget })
+    reloadPage(inner)
 end
 
 local function valueText(s, v)
@@ -684,34 +691,37 @@ local function settingsPage(inner)
     end
 end
 
--- EXPERIMENTAL: the features of coop/experimental.lua that are not fully tested yet, each
--- with its switch (off until the player switches it on).
-local function experimentalPage(inner)
+-- EXPERIMENTAL and TWEAKS: the features of coop/experimental.lua, each with its switch (off
+-- until the player switches it on).
+local function experimentalPage(inner, which)
     Experimental.page({
-        scr = scr, inner = inner, row = row, put = put, emptyLine = emptyLine, YELLOW = YELLOW,
+        scr = scr, inner = inner, row = row, put = put, emptyLine = emptyLine, group = group, YELLOW = YELLOW,
         write = writeValue,
         render = function() render() end,
         file = function() return evaluate(readFile() or "") end,
-    })
+    }, which)
 end
 
 ---------------------------------------------------------------- KEYBINDS
 
 -- Every key of the mod (config.lua). A key is bound when the game starts, so a change counts
--- after a restart.
+-- after a restart. `group` = a title above the rows that follow.
 local BINDS = {
+    { group = "LOBBY" },
     { key = "HostInviteKey", name = "Host a lobby and invite", default = "F6" },
     { key = "LeaveKey", name = "Leave the lobby", default = "F7" },
     { key = "StatusKey", name = "Lobby status", default = "F8" },
     { key = "ModOptionsKey", name = "Mod options", default = "F9" },
     { key = "ChatKey", name = "Chat", default = "/" },
+    { group = "CHARACTER" },
     { key = "EmoteKey", name = "Emote wheel", default = "V" },
     { key = "StrutKey", name = "Strut walk", default = "CAPS_LOCK" },
     { key = "ThirdPersonKey", name = "Third-person view", default = "P" },
+    { group = "WORLD" },
     { key = "WardrobeKey", name = "Use the mod's places", desc = "Clothes shops, the barber, the card room, the slot machines", default = "U" },
     { key = "TagNextKey", name = "Next tag", desc = "While the spray marker is out", default = "R" },
     { key = "TagPaintKey", name = "Coats of paint", desc = "While the spray marker is out", default = "C" },
-    { key = "DeliveryListKey", name = "Sort the task list", desc = "Experimental DELIVERY LIST. Held: hide or show what others have marked", default = "O" },
+    { key = "DeliveryListKey", name = "Sort the task list", desc = "Delivery list. Long press: hide/show what others have marked", default = "O" },
 }
 
 -- What the screen is doing about a key: { key (of config.lua), phase = "listen" | "confirm",
@@ -747,7 +757,7 @@ end
 local function clashOf(configKey, name)
     local ue = Keys.ue(name):upper()
     for _, b in ipairs(BINDS) do
-        if b.key ~= configKey and Keys.ue(bindValue(b)):upper() == ue then return b.name end
+        if b.key and b.key ~= configKey and Keys.ue(bindValue(b)):upper() == ue then return b.name end
     end
     return gameKeys()[ue]
 end
@@ -768,7 +778,13 @@ end
 
 local function keysPage(inner)
     fileValues = evaluate(readFile() or "") or fileValues
+    local first = true
     for _, b in ipairs(BINDS) do
+        if b.group then
+            group(inner, b.group, nil, first)
+            first = false
+            goto continue
+        end
         local value = bindValue(b)
         local sub, subColor = b.desc, nil
         local controls = {}
@@ -809,6 +825,7 @@ local function keysPage(inner)
             controls = { change.widget }
         end
         row(inner, b.name, sub, controls, subColor)
+        ::continue::
     end
 end
 
@@ -842,8 +859,8 @@ Core.onTick(function()
     render()
 end)
 
-local TABS = { { "settings", "SETTINGS" }, { "repair", "REPAIR" }, { "quests", "QUESTS" },
-    { "experimental", "EXPERIMENTAL" }, { "keys", "KEYBINDS" } }
+local TABS = { { "settings", "SETTINGS" }, { "repair", "REPAIR" },
+    { "tweaks", "TWEAKS" }, { "experimental", "EXPERIMENTAL" }, { "keys", "KEYBINDS" } }
 
 -- (MUSIC while the music addon is installed: coop/music.lua and its DLL)
 local function musicModule()
@@ -891,11 +908,18 @@ render = function()
     local line = scr.box(ACCENT, scr.sized(nil, W, 2))
     put(column, line, 14):SetHorizontalAlignment(1)
 
+    -- The tabs from the start of the red line to its end, with the same gap between every
+    -- two (whatever is left of the line's width); smaller in a window too narrow for them.
     local bar = scr.new("HorizontalBox")
     if Options.tab == "music" and not musicModule() then Options.tab = "experimental" end
     if Options.tab ~= "music" and musicModule() then musicModule().leavePage() end
+    local tabScale = 1.3 * math.min(1, W / 1200)
     for i, t in ipairs(tabs()) do
-        local b = scr.bigButton(t[2], 1.3, function()
+        if i > 1 then
+            local gap = bar:AddChildToHorizontalBox(scr.new("Spacer"))
+            gap:SetSize({ SizeRule = 1, Value = 1 })
+        end
+        local b = scr.bigButton(t[2], tabScale, function()
             if Options.tab ~= t[1] then
                 endBinding()
                 Options.tab = t[1]
@@ -903,10 +927,11 @@ render = function()
             end
         end)
         if Options.tab == t[1] then scr.tint(b, Screen.GREEN) end
-        bar:AddChildToHorizontalBox(b.box):SetPadding({ Left = i > 1 and 36 or 0, Top = 0, Right = 0, Bottom = 0 })
+        bar:AddChildToHorizontalBox(b.box)
     end
-    local bs = column:AddChildToVerticalBox(bar)
-    bs:SetPadding({ Left = -BUTTON_INSET * 1.3, Top = 0, Right = 0, Bottom = 16 })
+    local bs = column:AddChildToVerticalBox(scr.sized(bar, W + 2 * BUTTON_INSET * tabScale))
+    bs:SetHorizontalAlignment(1)
+    bs:SetPadding({ Left = -BUTTON_INSET * tabScale, Top = 0, Right = 0, Bottom = 16 })
 
     -- A page taller than the room has a scroll bar, which takes its width from the rows:
     -- such a page is drawn again as wide as the rows plus the bar (the bar right of the
@@ -918,6 +943,10 @@ render = function()
     local over = scr.overflow[Options.tab] == true
     local ls = column:AddChildToVerticalBox(scr.sized(scrollBox, over and W + BAR or W, math.floor(H * 0.6)))
     scr.list, scr.listTab, scr.listInner, scr.listHeight = scrollBox, Options.tab, inner, math.floor(H * 0.6)
+    -- (where the bar is across the picture, with some room to both sides: the column is in
+    -- the middle and the bar is its right end)
+    local right = U / 2 + (W + BAR) / 2
+    scr.barStrip = over and { (right - BAR - 10) / U, (right + 14) / U } or nil
 
     -- guests are told once that the settings are the host's
     if Options.tab == "settings" and scr.toldTab ~= "settings" and World.active and World.role == "guest" then
@@ -926,9 +955,9 @@ render = function()
     scr.toldTab = Options.tab
 
     local ok, e = xpcall(function()
-        if Options.tab == "quests" then reloadPage(inner)
-        elseif Options.tab == "repair" then repairPage(inner)
-        elseif Options.tab == "experimental" then experimentalPage(inner)
+        if Options.tab == "repair" then repairPage(inner)
+        elseif Options.tab == "experimental" then experimentalPage(inner, "experimental")
+        elseif Options.tab == "tweaks" then experimentalPage(inner, "tweaks")
         elseif Options.tab == "keys" then keysPage(inner)
         elseif Options.tab == "music" then
             musicModule().page({
@@ -960,6 +989,47 @@ render = function()
     end)
 end
 
+-- The scroll bar being dragged: the screen takes the mouse again twice a second
+-- (coop/screen.lua), and taking it makes the engine let go of whatever the mouse holds, the
+-- bar's handle too, which no script can ask about. So the screen is told to leave the
+-- mouse alone while the list is moving and while the pointer is on the bar.
+local scrolled = { offset = nil, at = -100 }
+
+-- True while the pointer is on the scroll bar's strip of the screen (`s.barStrip`: from
+-- where to where across the picture, as fractions of its width; nil on a page without a
+-- bar).
+local function overBar(s)
+    local player = World.player()
+    local strip = s.barStrip
+    if not player or not strip or not valid(s.list) then return false end
+    local pc = player:GetController()
+    local x, y, w, h = {}, {}, {}, {}
+    if pc:GetMousePosition(x, y) ~= true then return false end
+    pc:GetViewportSize(w, h)
+    local at, width = tonumber(x.LocationX), tonumber(w.SizeX)
+    if not at or not width or width <= 0 then return false end
+    return at >= strip[1] * width and at <= strip[2] * width
+end
+Options.overBar = function() return scr and overBar(scr) or false end
+
+local function holdMouse(s)
+    if not s.list then return false end
+    if os.clock() - scrolled.at < 0.8 then return true end
+    local ok, over = pcall(overBar, s)
+    return ok and over == true
+end
+
+Core.onTick(function()
+    if not live() or not scr or not scr.list then return end
+    local ok, offset = pcall(function() return scr.list:GetScrollOffset() end)
+    if not ok or type(offset) ~= "number" then return end
+    if scrolled.list ~= scr.list then
+        scrolled.list, scrolled.offset = scr.list, offset       -- (a page drawn again)
+    elseif offset ~= scrolled.offset then
+        scrolled.offset, scrolled.at = offset, os.clock()
+    end
+end)
+
 function Options.open(tab)
     if not live() or World.gone or World.joining then return false end
     local player = World.player()
@@ -974,6 +1044,7 @@ function Options.open(tab)
     local s = Screen.open()
     if not s then return false end
     scr, drawn = s, {}
+    s.holdMouse = function() return holdMouse(s) end
     s.onClose = function()
         leaveMusic()
         if scr == s then scr, drawn = nil, {} end

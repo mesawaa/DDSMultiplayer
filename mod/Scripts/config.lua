@@ -20,7 +20,7 @@ return {
     -- Open the chat line: Enter sends what you typed to everybody in the lobby, Escape
     -- closes it. "/" is the slash key; "ENTER" works too. "NONE" switches the chat key off.
     ChatKey = "/",
-    -- With the experimental DELIVERY LIST on: goes through the lists at the left of the
+    -- With Delivery list on (MOD OPTIONS, TWEAKS): goes through the lists at the left of the
     -- screen (all tasks, deliveries by drug, deliveries by area). "NONE" switches the key off.
     DeliveryListKey = "O",
     -- Show the other players on the map and the compass.
@@ -174,6 +174,7 @@ return {
 
     -- New features that are not fully tested yet. Each is off until it is switched on
     -- here (Name = true) or on the EXPERIMENTAL page of MOD OPTIONS, which lists them.
+    -- The switches of the TWEAKS page are kept here too.
     Experimental = {
     },
 }
