@@ -428,13 +428,22 @@ local volume = { music = 1, class = nil, at = -100, paused = false }
 -- The game's MUSIC slider counts only once its settings screen has been opened (the saved
 -- value is applied from there): until then the music plays at full loudness, whatever the
 -- saved number says. So: full until the slider is moved, then the slider.
-Core.Hooks.add("/Game/GUI/settingsWidget.settingsWidget_C:BndEvt__sliderMusicVol_K2Node_ComponentBoundEvent_5_OnFloatValueChangedEvent__DelegateSignature", function(_, value)
+-- (the game's UE 4.27 build has a slider of its own there, made for gamepads too: the first of
+-- these that exists is hooked)
+local MUSIC_SLIDER = "/Game/GUI/settingsWidget.settingsWidget_C:BndEvt__"
+local function onMusicSlider(_, value)
     if not live() then return end
     pcall(function()
         local v = value:get()
-        if type(v) == "number" then volume.music = math.max(0, math.min(1, v)) end
+        if type(v) == "number" then
+            if v > 1.001 then v = v / 100 end      -- (in case a slider counts to 100)
+            volume.music = math.max(0, math.min(1, v))
+        end
     end)
-end)
+end
+Core.Hooks.add({ MUSIC_SLIDER .. "sliderMusicVol_K2Node_ComponentBoundEvent_5_OnFloatValueChangedEvent__DelegateSignature",
+    MUSIC_SLIDER .. "settingsWidget_W_GamepadSettingsMusicVolSlider_1_K2Node_ComponentBoundEvent_58_OnValueChanged__DelegateSignature" }, onMusicSlider)
+Core.Hooks.add(MUSIC_SLIDER .. "settingsWidget_W_GamepadSettingsMusicVolSlider_1_K2Node_ComponentBoundEvent_62_OnValueChanged__DelegateSignature", onMusicSlider)
 
 local function readVolume()
     if os.clock() - volume.at < 4 then return end

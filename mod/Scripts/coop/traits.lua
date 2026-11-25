@@ -156,7 +156,7 @@ local function force(player)
     if door then target.doorLocked = false else target.garageLocked = false end
     pcall(function()
         local cue = Core.object(OPENED)
-        if valid(cue) then Core.statics():PlaySound2D(player, cue, 1.0, 1.0, 0.0, nil, nil) end
+        if valid(cue) then Core.sound2D(player, cue, 1.0, 1.0) end
     end)
     player:closeLockpickMode()
     Traits.stats.picks = Traits.stats.picks + 1

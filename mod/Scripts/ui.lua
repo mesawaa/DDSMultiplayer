@@ -32,6 +32,10 @@ local PROFILES = {
     main = {
         canvas = "buttonPanel",
         template = "btnOptions",            -- SETTINGS: the new entry copies it and sits below it
+        -- The game's later menu (UE 4.27, from the controller update): the entries are
+        -- W_MainMenuButton widgets in a column; the new entry is one of them, below SETTINGS.
+        column = "W_MainMenuButtonSettings",
+        columnPanel = { x = 640, y = -134 },  -- clear of its wider entries (GAME VERSION CHANGE)
         body = "txtDiffDesc",               -- widget whose font is used for body text
         entry = { y = 100 },                -- x is taken from the template
         shift = {                           -- stock widgets moved to make room: name, dx, dy
@@ -59,6 +63,13 @@ local PROFILES = {
         panel = { x = 760, y = -150 },
         blocker = "confirmPanel",
         raise = "confirmPanel",             -- keep the stock confirm dialog above our widgets
+        -- The game's later pause menu (UE 4.27): W_PauseMenuButton widgets on the canvas,
+        -- each 25 to the right and 80 below the one before (centred on those points).
+        placed = "W_PauseMenuButtonSettings",
+        placedEntry = { x = 396, y = 220 },
+        placedExtra = { x = 431, y = 300 },
+        placedShift = { { "W_PauseMenuButtonExit", 100, 160 } },
+        placedBlocker = "ConfirmPanel",
     },
 }
 
@@ -66,7 +77,7 @@ local function text(s) return FText(s) end
 
 local function className(obj) return obj:GetClass():GetFName():ToString() end
 
-local CONTAINERS = { CanvasPanel = true, VerticalBox = true, HorizontalBox = true, Button = true }
+local CONTAINERS = { CanvasPanel = true, VerticalBox = true, HorizontalBox = true, Button = true, WidgetSwitcher = true }
 
 local function collect(widget, out, depth)
     out[widget:GetFName():ToString()] = widget
@@ -126,6 +137,8 @@ local function addRow(box, widget, top, bottom, left)
     return slot
 end
 
+local buildColumnEntry, buildPlacedEntry, buildCanvasEntry, buildPanel
+
 local function build(kind, menu)
     local profile = PROFILES[kind]
     st = { kind = kind, profile = profile, menu = menu, address = menu:GetAddress(), tree = menu.WidgetTree,
@@ -134,9 +147,104 @@ local function build(kind, menu)
     local root = st.tree.RootWidget
     local w = collect(root, {}, 0)
     st.w = w
+    local canvas = profile.canvas and w[profile.canvas] or root
+    local column = profile.column and w[profile.column]
+    local placed = profile.placed and w[profile.placed]
+    if column then
+        buildColumnEntry(menu, column)
+    elseif placed then
+        buildPlacedEntry(menu, profile, w, canvas, placed)
+    else
+        buildCanvasEntry(profile, w, canvas)
+    end
+    local entry, entryLabel = st.entry, st.entryLabel
+
+    -- Panel.
+    buildPanel(kind, profile, w, canvas, entry, entryLabel)
+end
+
+-- The entry in a menu whose entries are W_MainMenuButton widgets stacked in a column: one
+-- more of them, made from the same class, put in below the template with the same slot.
+function buildColumnEntry(menu, tpl)
+    st.tplButton = tpl.MainMenuButton
+    st.tplLabel = tpl.MainMenuButtonTextBlock
+    st.follow = tpl
+    local lib = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
+    local owner = nil
+    pcall(function() owner = menu:GetOwningPlayer() end)
+    local outer = lib:Create(menu, tpl:GetClass(), owner)
+    if not C.valid(outer) then error("menu entry widget not made") end
+    outer.MainMenuButtonTextBlock:SetText(text("MULTIPLAYER"))
+    -- What comes after the template is taken out and put back after the new entry.
+    local box = tpl:GetParent()
+    local at = box:GetChildIndex(tpl)
+    local after = {}
+    for i = at + 1, box:GetChildrenCount() - 1 do
+        local c = box:GetChildAt(i)
+        local s = c.Slot
+        after[#after + 1] = { widget = c, pad = s.Padding, h = s.HorizontalAlignment, v = s.VerticalAlignment, size = s.Size }
+    end
+    for _, a in ipairs(after) do a.widget:RemoveFromParent() end
+    local function place(widget, pad, h, v, size)
+        local s = box:AddChildToVerticalBox(widget)
+        s:SetPadding(pad)
+        s:SetHorizontalAlignment(h)
+        s:SetVerticalAlignment(v)
+        s:SetSize(size)
+    end
+    local ts = tpl.Slot
+    place(outer, ts.Padding, ts.HorizontalAlignment, ts.VerticalAlignment, ts.Size)
+    for _, a in ipairs(after) do place(a.widget, a.pad, a.h, a.v, a.size) end
+    st.entryOuter = outer
+    st.entry, st.entryLabel = outer.MainMenuButton, outer.MainMenuButtonTextBlock
+end
+
+-- The entries in a menu whose entries are W_PauseMenuButton widgets at fixed places on a
+-- canvas: more of them, made from the same class, with the same slot settings.
+function buildPlacedEntry(menu, profile, w, canvas, tpl)
+    st.tplButton = tpl.MainMenuButton
+    st.tplLabel = st.tplButton:GetChildAt(0)
+    st.follow = tpl
+    st.blocker = profile.placedBlocker
+    local lib = StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
+    local owner = nil
+    pcall(function() owner = menu:GetOwningPlayer() end)
+    local ts = tpl.Slot
+    local function make(str, at)
+        local outer = lib:Create(menu, tpl:GetClass(), owner)
+        if not C.valid(outer) then error("menu entry widget not made") end
+        local slot = canvas:AddChildToCanvas(outer)
+        slot:SetAnchors(ts.LayoutData.Anchors)
+        slot:SetAlignment(ts.LayoutData.Alignment)
+        slot:SetAutoSize(ts.bAutoSize)
+        slot:SetSize(ts:GetSize())
+        slot:SetZOrder(ts:GetZOrder())
+        slot:SetPosition({ X = at.x, Y = at.y })
+        local inner = outer.MainMenuButton
+        local tb = inner:GetChildAt(0)
+        tb:SetText(text(str))
+        return outer, inner, tb
+    end
+    for _, move in ipairs(profile.placedShift or {}) do
+        local widget = w[move[1]]
+        if widget then
+            local slot = widget.Slot
+            local pos = slot:GetPosition()
+            st.moved[#st.moved + 1] = { slot = slot, x = pos.X, y = pos.Y }
+            slot:SetPosition({ X = pos.X + move[2], Y = pos.Y + move[3] })
+        end
+    end
+    if w[profile.placedBlocker] then w[profile.placedBlocker].Slot:SetZOrder(10) end
+    st.entryOuter, st.entry, st.entryLabel = make("MULTIPLAYER", profile.placedEntry)
+    if profile.extra and profile.placedExtra then
+        st.extraOuter, st.extra, st.extraLabel = make(profile.extra.label, profile.placedExtra)
+    end
+end
+
+-- The entry in a menu whose entries sit at fixed places on a canvas (the game until UE 4.21).
+function buildCanvasEntry(profile, w, canvas)
     st.tplButton = w[profile.template]
     st.tplLabel = st.tplButton:GetChildAt(0)
-    local canvas = profile.canvas and w[profile.canvas] or root
     local tplSlot = st.tplButton.Slot
     local tplPos = tplSlot:GetPosition()
 
@@ -198,8 +306,10 @@ local function build(kind, menu)
         end
         st.underline = { stock = stock, line = line, slot = slot, also = also, dx = u.dx, dy = u.dy, scale = 0, shown = 0, hidden = false }
     end
+end
 
-    -- Panel.
+-- The panel beside the entry, and the list of buttons polled each frame.
+function buildPanel(kind, profile, w, canvas, entry, entryLabel)
     local panel = new("Border")
     panel:SetBrushColor({ R = 0, G = 0, B = 0, A = 0.82 })
     panel:SetPadding({ Left = 28, Top = 22, Right = 28, Bottom = 14 })
@@ -265,7 +375,8 @@ local function build(kind, menu)
     panelSlot:SetAnchors({ Minimum = { X = 0, Y = 0.5 }, Maximum = { X = 0, Y = 0.5 } })
     panelSlot:SetAlignment({ X = 0, Y = 0 })
     panelSlot:SetAutoSize(true)
-    panelSlot:SetPosition({ X = profile.panel.x, Y = profile.panel.y })
+    local at = st.entryOuter and profile.columnPanel or profile.panel
+    panelSlot:SetPosition({ X = at.x, Y = at.y })
     panel:SetVisibility(VIS_COLLAPSED)
     st.panel = panel
     st.primary, st.primaryLabel = primary, primaryLabel
@@ -418,7 +529,7 @@ end
 ---------------------------------------------------------------- actions (act on the current menu)
 
 local function blocked()
-    local blocker = st.w[st.profile.blocker]
+    local blocker = st.w[st.blocker or st.profile.blocker]
     return blocker ~= nil and blocker.Visibility ~= VIS_COLLAPSED
 end
 
@@ -528,18 +639,18 @@ end
 -- The stock entries can fade in one by one (main menu intro). Follow the entry above
 -- ours so the new one is not visible early and fades with the rest.
 local function followStockEntry()
-    local tpl, entry = st.tplButton, st.entry
+    local tpl, entry = st.follow or st.tplButton, st.entryOuter or st.entry
     local opacity = tpl.RenderOpacity
     if opacity ~= st.entryOpacity then
         st.entryOpacity = opacity
         entry:SetRenderOpacity(opacity)
-        if st.extra then st.extra:SetRenderOpacity(opacity) end
+        if st.extra then (st.extraOuter or st.extra):SetRenderOpacity(opacity) end
     end
     local visibility = tpl.Visibility
     if visibility ~= st.entryVisibility then
         st.entryVisibility = visibility
         entry:SetVisibility(visibility)
-        if st.extra then st.extra:SetVisibility(visibility) end
+        if st.extra then (st.extraOuter or st.extra):SetVisibility(visibility) end
     end
 end
 
@@ -594,8 +705,9 @@ function UI.destroy(kind)
             s.underline.line:RemoveFromParent()
             s.underline.stock:SetRenderOpacity(1)
         end
-        if s.entry then s.entry:RemoveFromParent() end
-        if s.extra then s.extra:RemoveFromParent() end
+        if s.entryOuter then s.entryOuter:RemoveFromParent()
+        elseif s.entry then s.entry:RemoveFromParent() end
+        if s.extra then (s.extraOuter or s.extra):RemoveFromParent() end
     end)
     states[kind] = nil
     if st == s then st = nil end

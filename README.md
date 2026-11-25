@@ -1,7 +1,12 @@
 # DDS Multiplayer
 
-Co-op mod for Drug Dealer Simulator (Unreal Engine 4.21, Steam app 682990): Steam lobbies
-and invites, and a shared world hosted by one player, for up to four players.
+Co-op mod for Drug Dealer Simulator (Steam app 682990): Steam lobbies and invites, and a
+shared world hosted by one player, for up to four players.
+
+The same scripts run on the game's regular build (Unreal Engine 4.21) and on its
+`controller_beta` branch (Unreal Engine 4.27). The beta build is tested less often. Saves
+made on the regular build do not load properly on the beta build (this is the game's own
+behaviour, with or without the mod); saves made on the beta load there.
 
 This repository holds the complete source of the mod: the Lua scripts and the two pieces of
 compiled code, the Steam bridge DLL and the DLL of the optional music addon.

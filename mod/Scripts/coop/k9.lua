@@ -133,8 +133,8 @@ local function attach(lead, entry)
         local partner = lead.followerRef
         from = (valid(partner) and partner or lead).leashPosition:K2_GetComponentLocation()
     end)
-    local dog = Core.object("/Script/AIModule.Default__AIBlueprintHelperLibrary"):SpawnAIFromClass(player, dogClass, tree,
-        { X = from.X, Y = from.Y, Z = from.Z }, { Pitch = 0, Yaw = 0, Roll = 0 }, true)
+    local dog = Core.call(Core.object("/Script/AIModule.Default__AIBlueprintHelperLibrary"), "SpawnAIFromClass", table.pack(player, dogClass, tree,
+        { X = from.X, Y = from.Y, Z = from.Z }, { Pitch = 0, Yaw = 0, Roll = 0 }, true), table.pack(nil))
     if not valid(dog) then
         pcall(function() leash:K2_DestroyActor() end)
         error("no dog")

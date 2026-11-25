@@ -278,6 +278,44 @@ local function makeRing(owner, canvas, x, y, size, grow)
     return img
 end
 
+-- A ring round a picture that sits on a canvas, wherever and however large it is there
+-- (taken from the picture's own slot: the game's UE 4.27 build moved the pictures of the
+-- contact list), `grow` outside it.
+local function makeRingOn(owner, pic, grow)
+    local slot = pic.Slot
+    local canvas = pic:GetParent()
+    local pos, size = slot:GetPosition(), slot:GetSize()
+    local L = slot.LayoutData
+    local w, h = size.X, size.Y
+    if slot:GetAutoSize() or w < 1 then
+        local s = pic.Brush.ImageSize
+        w, h = s.X, s.Y
+    end
+    local across = math.floor(math.min(w, h) + 0.5)
+    local rt = ringPicture(across + 2 * grow)
+    if not rt or not valid(canvas) then return nil end
+    local img = StaticConstructObject(StaticFindObject("/Script/UMG.Image"), owner.WidgetTree)
+    if not valid(img) then return nil end
+    pcall(function() img:SetBrushFromTexture(rt, false) end)
+    pcall(function()
+        local now = img.Brush.ResourceObject
+        if not valid(now) or now:GetAddress() ~= rt:GetAddress() then img.Brush.ResourceObject = rt end
+        img.Brush.ImageSize = { X = RING_UNITS, Y = RING_UNITS }
+    end)
+    img:SetVisibility(NO_HIT)
+    -- (the middle of the ring's image on the middle of the picture, in the picture's anchors)
+    local cx = pos.X + (0.5 - L.Alignment.X) * w
+    local cy = pos.Y + (0.5 - L.Alignment.Y) * h
+    local s = canvas:AddChildToCanvas(img)
+    s:SetAnchors(L.Anchors)
+    s:SetAlignment({ X = 0.5, Y = 0.5 })
+    s:SetAutoSize(false)
+    s:SetPosition({ X = cx, Y = cy })
+    s:SetSize({ X = RING_UNITS, Y = RING_UNITS })
+    s:SetZOrder(math.max(3, slot:GetZOrder() + 1))
+    return img
+end
+
 ---------------------------------------------------------------- Shady Comm
 
 local function interface()
@@ -336,11 +374,17 @@ local function makeButton(row)
         rowSlot:SetAlignment({ X = 0, Y = 0 })
         rowSlot:SetOffsets({ Left = 0, Top = 0, Right = 0, Bottom = 0 })
     end)
+    -- (exactly over the picture: its slot's place and size)
+    local pic = row.avatar.Slot
     local slot = row.avatar:GetParent():AddChildToCanvas(w)
     slot:SetAutoSize(false)
-    slot:SetPosition({ X = 30, Y = 10 })
-    slot:SetSize({ X = 36, Y = 36 })
-    slot:SetZOrder(4)
+    slot:SetAnchors(pic.LayoutData.Anchors)
+    slot:SetAlignment(pic.LayoutData.Alignment)
+    slot:SetPosition(pic:GetPosition())
+    local size = pic:GetSize()
+    if pic:GetAutoSize() or size.X < 1 then size = row.avatar.Brush.ImageSize end
+    slot:SetSize({ X = size.X, Y = size.Y })
+    slot:SetZOrder(math.max(4, pic:GetZOrder() + 2))
     return w
 end
 
@@ -362,7 +406,7 @@ local function decorate(ui)
             if on() then pcall(function() want = rowColour(row) end) end
             if r.img and not valid(r.img) then r.img, r.hex = nil, nil end
             if want and not r.img then
-                pcall(function() r.img = makeRing(row, row.avatar:GetParent(), 30, 10, 36, 2) end)
+                pcall(function() r.img = makeRingOn(row, row.avatar, 2) end)
             end
             if r.img and r.hex ~= (want or "") then
                 r.hex = want or ""
@@ -396,7 +440,7 @@ local function decorate(ui)
 end
 
 -- (the lists are drawn anew by the game for many reasons: ours follows a moment later)
-Core.Hooks.add(INTERFACE .. ":renderContacts", function() if live() then dirty = true end end)
+Core.Hooks.add({ INTERFACE .. ":renderContacts", INTERFACE .. ":Render Contacts" }, function() if live() then dirty = true end end)
 
 -- A click on one of the buttons over the pictures, heard the two ways the mod's screens
 -- hear their buttons (coop/screen.lua): the game's own click event of that kind of button,
@@ -640,13 +684,58 @@ local wasDown = false
 local function detach()
     if not att then return end
     pcall(function() if valid(att.button) then att.button:RemoveFromParent() end end)
+    pcall(function() if valid(att.buttonBox) then att.buttonBox:RemoveFromParent() end end)
     pcall(function() if valid(att.ring) then att.ring:RemoveFromParent() end end)
     att = nil
+end
+
+-- The ring round a picture that sits in an overlay (Shady Comm of the game's UE 4.27 build):
+-- painted to fill its own image, which is as large as the picture (the overlay keeps its
+-- size) and drawn `grow` larger all round.
+local function makeRingOver(owner, pic, grow)
+    local overlay = pic:GetParent()
+    local across = 0
+    pcall(function() across = pic.Brush.ImageSize.X end)
+    if not valid(overlay) or not across or across < 8 then return nil end
+    local saved = Marks.RING_WIDTH
+    Marks.RING_WIDTH = saved * RING_UNITS / (across + 2 * grow)
+    local ok, rt = pcall(ringPicture, RING_UNITS)
+    Marks.RING_WIDTH = saved
+    if not ok or not rt then return nil end
+    local img = StaticConstructObject(StaticFindObject("/Script/UMG.Image"), owner.WidgetTree)
+    if not valid(img) then return nil end
+    pcall(function() img:SetBrushFromTexture(rt, false) end)
+    pcall(function()
+        local now = img.Brush.ResourceObject
+        if not valid(now) or now:GetAddress() ~= rt:GetAddress() then img.Brush.ResourceObject = rt end
+        img.Brush.ImageSize = { X = across, Y = across }
+    end)
+    img:SetVisibility(NO_HIT)
+    local slot = overlay:AddChildToOverlay(img)
+    slot:SetHorizontalAlignment(2)   -- centre
+    slot:SetVerticalAlignment(2)
+    img:SetRenderTransformPivot({ X = 0.5, Y = 0.5 })
+    img:SetRenderScale({ X = (across + 2 * grow) / across, Y = (across + 2 * grow) / across })
+    return img
 end
 
 local function attach(ui)
     local a = { address = ui:GetAddress() }
     local panel = ui.btnDesktop:GetParent()
+    a.onCanvas = panel:GetClass():GetFName():ToString() == "CanvasPanel"
+    if not a.onCanvas then
+        -- the game's UE 4.27 build: the picture in an overlay, PICTURE in a row under the
+        -- name (both found by coop/shady.lua); the ring and COLOUR are added once those are
+        -- there (placeButton)
+        pcall(function()
+            local player = World.player()
+            local w = library():Create(player, Core.class(TAB), player:GetController())
+            w.txtBtnName:SetText(FText("COLOUR"))
+            w.btnShow:SetRenderOpacity(1)
+            a.button = w
+        end)
+        return a
+    end
     -- the ring round the player's picture (the picture is 50 across at 20, 20)
     pcall(function() a.ring = makeRing(ui, panel, 20, 20, 50, 2) end)
     -- COLOUR, beside PICTURE (coop/shady.lua's button). It is put in place once PICTURE
@@ -675,6 +764,22 @@ local function placeButton(a)
     local x, y = nil, nil
     local Shady = package.loaded["coop.shady"]
     local theirs = type(Shady) == "table" and Shady.attached and Shady.attached() or nil
+    if not a.onCanvas then
+        -- beside PICTURE in its row, made as small by a scale box; the ring on the picture
+        if not (theirs and valid(theirs.buttonRow) and valid(theirs.image)) then return false end
+        local ui = interface()
+        if not ui then return false end
+        if not a.ring then pcall(function() a.ring = makeRingOver(ui, theirs.image, 2) end) end
+        local box = StaticConstructObject(StaticFindObject("/Script/UMG.ScaleBox"), ui.WidgetTree)
+        box:SetStretch(7)                -- UserSpecified
+        box:SetUserSpecifiedScale(0.62)
+        box:AddChild(a.button)
+        local slot = theirs.buttonRow:AddChildToHorizontalBox(box)
+        slot:SetPadding({ Left = 4, Top = 0, Right = 0, Bottom = 0 })
+        a.buttonBox = box
+        a.placed = true
+        return true
+    end
     if theirs and valid(theirs.button) then
         pcall(function()
             local p = theirs.button.Slot:GetPosition()

@@ -122,7 +122,7 @@ local function buildRoom()
     local function dyed(parent, params)
         local base = asset(BAR .. "Materials/" .. parent .. "." .. parent:match("[^/]+$"))
         if not base then return nil end
-        local m = KML:CreateDynamicMaterialInstance(player, base, FName("None"))
+        local m = Core.dynMaterial(player, base)
         for name, v in pairs(params) do
             if type(v) == "table" then m:SetVectorParameterValue(FName(name), v) else m:SetScalarParameterValue(FName(name), v) end
         end

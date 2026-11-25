@@ -70,6 +70,58 @@ function Core.valid(obj)
     return obj ~= nil and type(obj) == "userdata" and obj.IsValid ~= nil and obj:IsValid()
 end
 
+-- obj:fname(args...) on either engine. UE 4.27 (the controller update) added parameters at
+-- the end of some engine functions (SpawnAIFromClass: Owner; K2_SetTimer: start delays), and
+-- UE4SS wants every parameter. When the call is refused for that, it is made again with the
+-- missing ones from `extra` (table.pack(...), so nils count), and that number is kept.
+local arity = {}
+function Core.call(obj, fname, args, extra)
+    local n = args.n or #args
+    local want = arity[fname]
+    if want and want > n then
+        local full = {}
+        for i = 1, n do full[i] = args[i] end
+        for i = n + 1, want do full[i] = extra[i - n] end
+        return obj[fname](obj, table.unpack(full, 1, want))
+    end
+    local ok, r = pcall(function() return obj[fname](obj, table.unpack(args, 1, n)) end)
+    if ok then return r end
+    local need = tonumber(tostring(r):match("expected (%d+) parameters"))
+    local more = extra and (extra.n or #extra) or 0
+    if not need or need <= n or need - n > more then error(r, 0) end
+    arity[fname] = need
+    return Core.call(obj, fname, args, extra)
+end
+
+-- A render target (KismetRenderingLibrary), cleared to black, on either engine.
+function Core.renderTarget(outer, w, h, format)
+    return Core.call(StaticFindObject("/Script/Engine.Default__KismetRenderingLibrary"), "CreateRenderTarget2D",
+        table.pack(outer, w, h, format), table.pack({ R = 0, G = 0, B = 0, A = 1 }, false))
+end
+
+-- A sound played once without a place (GameplayStatics.PlaySound2D), on either engine.
+function Core.sound2D(outer, sound, volume, pitch)
+    return Core.call(StaticFindObject("/Script/Engine.Default__GameplayStatics"), "PlaySound2D",
+        table.pack(outer, sound, volume or 1, pitch or 1, 0, nil, nil), table.pack(false))
+end
+
+-- A dynamic material made from `base` (KismetMaterialLibrary). The function takes three
+-- parameters in the game until UE 4.21 and four in UE 4.27 (the controller update: creation
+-- flags); which one this engine wants is learnt on the first call.
+local midFlags = nil
+function Core.dynMaterial(outer, base, name)
+    local KML = StaticFindObject("/Script/Engine.Default__KismetMaterialLibrary")
+    local n = FName(name or "None")
+    if midFlags == nil then
+        local ok, m = pcall(function() return KML:CreateDynamicMaterialInstance(outer, base, n) end)
+        if ok then midFlags = false return m end
+        if not tostring(m):find("expected 4", 1, true) then error(m, 0) end
+        midFlags = true
+    end
+    if midFlags then return KML:CreateDynamicMaterialInstance(outer, base, n, 0) end
+    return KML:CreateDynamicMaterialInstance(outer, base, n)
+end
+
 -- After a world load the engine keeps the old, destroyed actors around until its next
 -- garbage collection, and FindFirstOf can return those. These helpers skip them.
 function Core.alive(actor)
@@ -388,35 +440,60 @@ local Hooks = { list = {} }
 Core.Hooks = Hooks
 
 -- fn(context, params...) is called for every call of the Blueprint function at `path`.
--- UE4SS runs it after the function has returned on this engine version.
+-- UE4SS runs it after the function has returned on this engine version. `path` can be a
+-- list of paths: the first function that exists is hooked (the game's UE 4.27 build renamed
+-- some of its Blueprint functions, "renderContacts" became "Render Contacts").
 function Hooks.add(path, fn, onRegistered)
     Hooks.list[#Hooks.list + 1] = { path = path, fn = fn, onRegistered = onRegistered }
 end
 
 local function ensureOne(h)
-    local fn = StaticFindObject(h.path)
+    local path, fn = h.path, nil
+    if type(path) == "table" then
+        for _, p in ipairs(path) do
+            fn = StaticFindObject(p)
+            if Core.valid(fn) then path = p break end
+        end
+    else
+        fn = StaticFindObject(path)
+    end
     if not Core.valid(fn) then return end
     local addr = fn:GetAddress()
     if h.addr == addr then return end
     -- the registration made for the function object of an earlier world goes first
-    if h.pre ~= nil and UnregisterHook then pcall(UnregisterHook, h.path, h.pre, h.post) end
-    h.pre, h.post = nil, nil
+    if h.pre ~= nil and UnregisterHook then pcall(UnregisterHook, h.at or path, h.pre, h.post) end
+    h.pre, h.post, h.at = nil, nil, path
     h.gen = (h.gen or 0) + 1
     local gen = h.gen
     local callback = function(...)
         if h.gen ~= gen then return end
         local ok, e = xpcall(h.fn, debug.traceback, ...)
-        if not ok then Core.log("Hook error in %s: %s", h.path, tostring(e)) end
+        if not ok then Core.log("Hook error in %s: %s", path, tostring(e)) end
     end
-    local ok, pre, post = pcall(RegisterHook, h.path, callback, function() end)
+    local ok, pre, post = pcall(RegisterHook, path, callback, function() end)
     if ok then
         h.addr = addr
         if type(pre) == "number" then h.pre, h.post = pre, post end
         if h.onRegistered then pcall(h.onRegistered) end
-        Core.vlog("Hooked %s", h.path)
+        Core.vlog("Hooked %s", path)
     else
-        Core.log("Could not hook %s: %s", h.path, tostring(pre))
+        Core.log("Could not hook %s: %s", path, tostring(pre))
     end
+end
+
+-- obj:name(...) with the first of `names` the object has (Blueprint functions the game's
+-- UE 4.27 build renamed: { "renderContacts", "Render Contacts" }).
+function Core.callFirst(obj, names, ...)
+    local args = table.pack(...)
+    local last = nil
+    for _, name in ipairs(names) do
+        local ok, r = pcall(function() return obj[name](obj, table.unpack(args, 1, args.n)) end)
+        if ok then return r end
+        last = tostring(r)
+        -- only "there is no such function" moves on to the next name
+        if not (last:find("TrivialObject", 1, true) or last:find("a nil value", 1, true)) then error(r, 0) end
+    end
+    error(last, 0)
 end
 
 -- Looking a function up costs several milliseconds, so only a few hooks are looked at per

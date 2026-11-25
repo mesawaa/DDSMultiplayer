@@ -143,10 +143,10 @@ local function refreshPhone(messages)
         local computer = Repl.singleton("mainComputer_C")
         local ui = computer and computer.interface
         if not valid(ui) then return end
-        ui:renderContacts()
+        Core.callFirst(ui, { "renderContacts", "Render Contacts" })
         local user = ui.curSelectedUser
         if type(user) ~= "number" or user < 0 then return end
-        if messages then ui:renderMessages(user) end
+        if messages then Core.callFirst(ui, { "renderMessages", "Render Messages" }, user) end
         ui:checkOptionAvailability()
     end)
 end

@@ -127,7 +127,7 @@ local function setCitizenTimer(population, enabled)
     if enabled then
         if citizenTimerOff ~= address then return end       -- never stopped here: it runs
         citizenTimerOff = nil
-        ksl:K2_SetTimer(population, CITIZEN_TIMER, CITIZEN_EVERY, true)
+        Core.call(ksl, "K2_SetTimer", table.pack(population, CITIZEN_TIMER, CITIZEN_EVERY, true), table.pack(0, 0))
     else
         citizenTimerOff = address
         ksl:K2_ClearTimer(population, CITIZEN_TIMER)
@@ -561,8 +561,8 @@ Net.on("pn", function(sender, data)
     if not class then return end
     applying = true
     local ok, e = pcall(function()
-        local npc = ai():SpawnAIFromClass(player, class, nil, { X = data.x, Y = data.y, Z = data.z + 10 },
-            { Pitch = 0, Yaw = data.yw or 0, Roll = 0 }, true)
+        local npc = Core.call(ai(), "SpawnAIFromClass", table.pack(player, class, nil, { X = data.x, Y = data.y, Z = data.z + 10 },
+            { Pitch = 0, Yaw = data.yw or 0, Roll = 0 }, true), table.pack(nil))
         if not valid(npc) then error("spawn returned nothing") end
         if type(data.v) == "table" then
             Repl.import(npc, data.v)

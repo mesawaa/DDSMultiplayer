@@ -325,6 +325,29 @@ local PAINTED_SKIN = { MI_fe_sport_01 = true }
 -- throws it away when no figure uses it any more (between two worlds), and a pointer kept from the world before
 -- still answers IsValid: giving that to a figure crashed the game on the next world's first woman (v0.16.0).
 local FEMALE_ANIM_CLASS = FEMALE_ANIM_BP .. "." .. FEMALE_ANIM_BP:match("[^/]+$") .. "_C"
+
+-- Gives a skeletal mesh its animation blueprint. The engine of the game until UE 4.21 names
+-- the function K2_SetAnimInstanceClass; UE 4.27 (the controller update) SetAnimClass.
+local function setAnimInstance(comp, class)
+    if pcall(function() comp:K2_SetAnimInstanceClass(class) end) then return end
+    comp:SetAnimClass(class)
+end
+Avatar.setAnimInstance = setAnimInstance
+
+-- Shows or hides the part of a mesh that wears material `id`. UE 4.27 asks for the section
+-- too (MaterialID, SectionIndex, bShow, LODIndex); a section of these meshes wears the
+-- material of the same number.
+local sectionArgs = nil
+local function showSection(comp, id, show, lod)
+    if sectionArgs ~= 4 then
+        local ok, e = pcall(function() comp:ShowMaterialSection(id, show, lod) end)
+        if ok then sectionArgs = 3 return end
+        if not tostring(e):find("expected 4", 1, true) then error(e, 0) end
+        sectionArgs = 4
+    end
+    comp:ShowMaterialSection(id, id, show, lod)
+end
+
 local function animClass(female)
     if not female then return asset(ANIM_CLASS) end
     if memo then
@@ -363,7 +386,7 @@ local function toBlueprint(p)
     setSkeleton(p, false)
     p.comp:SetAnimationMode(0)
     local class = animClass(p.female and p.skel == "f")
-    if class then p.comp:K2_SetAnimInstanceClass(class) end
+    if class then setAnimInstance(p.comp, class) end
 end
 
 -- Men running. The citizens have a walk and nothing faster; the policemen have a run, and
@@ -535,7 +558,7 @@ local function build(look, pos, name)
         local comp = body.SkeletalMeshComponent
         comp:SetSkeletalMesh(bodyMesh, true)
         local anim = animClass(female)
-        if anim then comp:K2_SetAnimInstanceClass(anim) end
+        if anim then setAnimInstance(comp, anim) end
         p.body, p.comp = body, comp
         if female then
             comp:SetVisibility(false, false)
@@ -577,7 +600,7 @@ local function build(look, pos, name)
                         local cur = c:GetMaterial(i)
                         local n = valid(cur) and cur:GetFName():ToString():lower() or ""
                         if not n:find(only, 1, true) then
-                            for lod = 0, 3 do pcall(function() c:ShowMaterialSection(i, false, lod) end) end
+                            for lod = 0, 3 do pcall(showSection, c, i, false, lod) end
                         end
                     end
                 end

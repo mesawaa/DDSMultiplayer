@@ -472,7 +472,7 @@ local function slotFor(key, kind)
         local holder = player:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.DecalActor"),
             { X = l.X, Y = l.Y, Z = l.Z - 9000 }, { Pitch = 0, Yaw = 0, Roll = 0 })
         holder:SetActorHiddenInGame(true)
-        local rt = rendering():CreateRenderTarget2D(player, SHAPES[kind].cols * SIZE, SHAPES[kind].rows * SIZE, 2)
+        local rt = Core.renderTarget(player, SHAPES[kind].cols * SIZE, SHAPES[kind].rows * SIZE, 2)
         local d = holder.Decal
         d:SetDecalMaterial(base)
         local mid = d:CreateDynamicMaterialInstance()
@@ -1682,7 +1682,7 @@ local function sample(s, player)
     local image = nil
     local ok = pcall(function()
         white = white or asset(WHITE)
-        local rt = rendering():CreateRenderTarget2D(player, 128, 128, 2)
+        local rt = Core.renderTarget(player, 128, 128, 2)
         rendering():ClearRenderTarget2D(player, rt, CLEAR)
         withCanvas(player, rt, function(cv)
             cv:K2_DrawPolygon(white, { X = 64, Y = 64 }, { X = 63, Y = 63 }, 48, { R = 1, G = 1, B = 1, A = 1 })
@@ -1703,7 +1703,7 @@ local function strip(s, player)
     pcall(function()
         white = white or asset(WHITE)
         local w, h = STRIP_W * STRIP_CELL, STRIP_H * STRIP_CELL
-        local rt = rendering():CreateRenderTarget2D(player, w, h, 2)
+        local rt = Core.renderTarget(player, w, h, 2)
         rendering():ClearRenderTarget2D(player, rt, CLEAR)
         withCanvas(player, rt, function(cv)
             for x = 0, STRIP_W - 1 do

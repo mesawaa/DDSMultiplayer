@@ -188,7 +188,7 @@ local function materialFor(kind, player)
     local base, pic = asset(SKIN), texture(kind.picture)
     if not base or not pic then return nil end
     local KML = StaticFindObject("/Script/Engine.Default__KismetMaterialLibrary")
-    local m = KML:CreateDynamicMaterialInstance(player, base, FName("None"))
+    local m = Core.dynMaterial(player, base)
     if not valid(m) then return nil end
     m:SetTextureParameterValue(FName("Albedo"), pic)
     local black, flat = asset(BLACK), asset(FLAT)
@@ -257,12 +257,14 @@ end
 
 -- The game's day: what a spawner puts down is decided anew every day.
 local function today()
-    local d = 0
+    local d = nil
     pcall(function()
         local clock = Core.find("BP_WorldTimeAndConditions_C")
         d = clock:GetCurrentIntDay() * 100 + clock:GetCurrentIntMonth()
     end)
-    return d
+    -- (the clock of the game's UE 4.27 build has no month: the game's own day count instead)
+    if d == nil then pcall(function() d = Core.find("dayTimeControler_C").curDayNum end) end
+    return d or 0
 end
 
 local spawners = { owner = nil, at = 0, list = {} }
@@ -629,7 +631,7 @@ local CASH_SOUND = "/Game/Audio/GUI/popupCashRecieved_SFX.popupCashRecieved_SFX"
 local function sound(path, volume, pitch)
     pcall(function()
         local s = asset(path)
-        if s then StaticFindObject("/Script/Engine.Default__GameplayStatics"):PlaySound2D(World.player(), s, volume or 1, pitch or 1, 0, nil, nil) end
+        if s then Core.sound2D(World.player(), s, volume, pitch) end
     end)
 end
 

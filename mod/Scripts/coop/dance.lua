@@ -79,9 +79,9 @@ local function build()
     -- long as the floor is there: a colour no tile shows at the moment would otherwise be
     -- thrown away at the engine's next clean-up, and using it afterwards crashes the game.
     local function colour(c)
-        local target = KRL:CreateRenderTarget2D(player, 4, 4, 2)
+        local target = Core.renderTarget(player, 4, 4, 2)
         KRL:ClearRenderTarget2D(player, target, { R = c[1], G = c[2], B = c[3], A = 1 })
-        local m = KML:CreateDynamicMaterialInstance(player, base, FName("None"))
+        local m = Core.dynMaterial(player, base)
         m:SetTextureParameterValue(FName("SpriteTexture"), target)
         local keeper = block(X0, Y0, FLOOR - 300, 0.01, 0.01, 0.01)
         keeper:SetActorHiddenInGame(true)

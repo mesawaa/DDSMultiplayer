@@ -437,7 +437,7 @@ local function paintMessages(ui)
     end
 end
 
-Core.Hooks.add(INTERFACE .. ":renderMessages", function(ctx)
+Core.Hooks.add({ INTERFACE .. ":renderMessages", INTERFACE .. ":Render Messages" }, function(ctx)
     if not live() then return end
     local ok, e = pcall(function()
         local ui = ctx:get()
@@ -494,7 +494,7 @@ local function addPlayers(ui)
     for _, w in ipairs(rest) do if valid(w) then list:AddChild(w) end end
 end
 
-Core.Hooks.add(INTERFACE .. ":renderContacts", function(ctx)
+Core.Hooks.add({ INTERFACE .. ":renderContacts", INTERFACE .. ":Render Contacts" }, function(ctx)
     if not live() then return end
     local ok, e = pcall(function()
         local ui = ctx:get()
@@ -524,12 +524,21 @@ end
 local function attach(ui)
     local a = { address = ui:GetAddress() }
     local panel = ui.btnDesktop:GetParent()
-    for i = 0, panel:GetChildrenCount() - 1 do
-        local c = panel:GetChildAt(i)
-        local name = c:GetFName():ToString()
-        if name == "Image_8" then a.image = c end
-        if name == "VerticalBox_12" then a.nameBox = c end
+    -- (the game's UE 4.27 build keeps the picture and the name deeper, in an overlay)
+    local function find(w, name, depth)
+        if w:GetFName():ToString() == name then return w end
+        if depth > 12 then return nil end
+        local n = 0
+        pcall(function() n = w:GetChildrenCount() end)
+        for i = 0, (n or 0) - 1 do
+            local hit = find(w:GetChildAt(i), name, depth + 1)
+            if hit then return hit end
+        end
+        return nil
     end
+    local root = ui.WidgetTree.RootWidget
+    a.image, a.nameBox = find(root, "Image_8", 0), find(root, "VerticalBox_12", 0)
+    local onCanvas = panel:GetClass():GetFName():ToString() == "CanvasPanel"
     -- the line at the right of the top bar: "Loged in as" and the game's made-up name
     pcall(function()
         -- (it is no variable of the screen: looked up by its name in the screen's widget tree)
@@ -549,12 +558,28 @@ local function attach(ui)
         local w = lib:Create(player, asset(TAB), pc)
         w.txtBtnName:SetText(FText("PICTURE"))
         w.btnShow:SetRenderOpacity(1)
-        w:SetRenderTransformPivot({ X = 0, Y = 0 })
-        w:SetRenderScale({ X = 0.62, Y = 0.62 })
-        local slot = panel:AddChildToCanvas(w)
-        slot:SetAutoSize(true)
-        slot:SetPosition({ X = at.X - 6, Y = at.Y + 22 })
-        slot:SetZOrder(5)
+        if onCanvas then
+            w:SetRenderTransformPivot({ X = 0, Y = 0 })
+            w:SetRenderScale({ X = 0.62, Y = 0.62 })
+            local slot = panel:AddChildToCanvas(w)
+            slot:SetAutoSize(true)
+            slot:SetPosition({ X = at.X - 6, Y = at.Y + 22 })
+            slot:SetZOrder(5)
+        else
+            -- a row of its own under the name, made smaller by a scale box (it takes the room
+            -- it is drawn in)
+            local box = StaticConstructObject(StaticFindObject("/Script/UMG.ScaleBox"), ui.WidgetTree)
+            box:SetStretch(7)                -- UserSpecified
+            box:SetUserSpecifiedScale(0.62)
+            box:AddChild(w)
+            -- (in a row of their own: coop/marks.lua puts COLOUR beside it)
+            local row = StaticConstructObject(StaticFindObject("/Script/UMG.HorizontalBox"), ui.WidgetTree)
+            row:AddChildToHorizontalBox(box)
+            local slot = a.nameBox:AddChildToVerticalBox(row)
+            slot:SetHorizontalAlignment(1)   -- left
+            slot:SetPadding({ Left = -4, Top = 4, Right = 0, Bottom = 0 })
+            a.buttonBox, a.buttonRow = box, row
+        end
         a.button = w
     end)
     return a
@@ -703,7 +728,7 @@ Core.every(0.5, function()
         end
         att = a
         -- (the lists as they stand were drawn before we looked)
-        pcall(function() ui:renderContacts() end)
+        pcall(Core.callFirst, ui, { "renderContacts", "Render Contacts" })
         pcall(function() if ui.curSelectedUser >= 0 then paintMessages(ui) end end)
     end
     -- the Steam name where the game has its made-up one (it is known in single player too)
@@ -727,7 +752,7 @@ Core.every(0.5, function()
     local sig = signature(others)
     if att.roster ~= sig then
         att.roster = sig
-        pcall(function() ui:renderContacts() end)
+        pcall(Core.callFirst, ui, { "renderContacts", "Render Contacts" })
         pcall(function() if ui.curSelectedUser >= 0 then paintMessages(ui) end end)
     end
 end)

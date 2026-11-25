@@ -134,7 +134,7 @@ function Npc.spawnClient(orderId, x, y, z, yaw)
     local class = loadClass(male and MALE or FEMALE)
     if not class then error("client class not available") end
     local ai = StaticFindObject("/Script/AIModule.Default__AIBlueprintHelperLibrary")
-    local npc = ai:SpawnAIFromClass(player, class, nil, { X = x, Y = y, Z = z }, { Pitch = 0, Yaw = yaw or 0, Roll = 0 }, true)
+    local npc = Core.call(ai, "SpawnAIFromClass", table.pack(player, class, nil, { X = x, Y = y, Z = z }, { Pitch = 0, Yaw = yaw or 0, Roll = 0 }, true), table.pack(nil))
     if not valid(npc) then error("spawn returned nothing") end
     -- Looks and risk come from the shared client list.
     local looks = Repl.splitArray(Repl.export(sales, { "clientsLookData" }).clientsLookData or "()")[client + 1]

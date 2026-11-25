@@ -148,7 +148,7 @@ local function takeBack(s)
         end
         pcall(function()
             if valid(c.interface) then
-                c.interface:renderContacts()
+                Core.callFirst(c.interface, { "renderContacts", "Render Contacts" })
                 c.interface:checkOptionAvailability()
             end
         end)

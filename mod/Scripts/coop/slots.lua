@@ -132,7 +132,7 @@ local UNLIT = "/Paper2D/OpaqueUnlitSpriteMaterial.OpaqueUnlitSpriteMaterial"
 local function pictureMaterial(player, pic)
     local base = asset(UNLIT)
     if not base or not pic then return nil end
-    local m = StaticFindObject("/Script/Engine.Default__KismetMaterialLibrary"):CreateDynamicMaterialInstance(player, base, FName("None"))
+    local m = Core.dynMaterial(player, base)
     if not valid(m) then return nil end
     m:SetTextureParameterValue(FName("SpriteTexture"), pic)
     return m
@@ -140,7 +140,7 @@ end
 
 local function colourMaterial(player, r, g, b)
     local KRL = StaticFindObject("/Script/Engine.Default__KismetRenderingLibrary")
-    local target = KRL:CreateRenderTarget2D(player, 4, 4, 2)
+    local target = Core.renderTarget(player, 4, 4, 2)
     KRL:ClearRenderTarget2D(player, target, { R = r, G = g, B = b, A = 1 })
     return pictureMaterial(player, target), target
 end
@@ -298,7 +298,7 @@ local function sound(m, path, volume, pitch)
             volume = volume * 0.4
         end
         local cue = asset(path)
-        if cue then StaticFindObject("/Script/Engine.Default__GameplayStatics"):PlaySound2D(player, cue, volume, pitch, 0, nil, nil) end
+        if cue then Core.sound2D(player, cue, volume, pitch) end
     end)
 end
 

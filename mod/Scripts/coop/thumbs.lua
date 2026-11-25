@@ -84,7 +84,7 @@ function Thumbs.get(key, spec)
     local shot = SHOTS[spec.shot] or SHOTS.body
     local ok, made = pcall(function()
         local KRL = StaticFindObject("/Script/Engine.Default__KismetRenderingLibrary")
-        local rt = KRL:CreateRenderTarget2D(player, shot.w, shot.h, RGBA8)
+        local rt = Core.renderTarget(player, shot.w, shot.h, RGBA8)
         local l = player:K2_GetActorLocation()
         local cam = player:GetWorld():SpawnActor(StaticFindObject("/Script/Engine.SceneCapture2D"),
             { X = l.X, Y = l.Y, Z = l.Z - Thumbs.depth }, { Pitch = 0, Yaw = 0, Roll = 0 })
@@ -159,12 +159,12 @@ Core.onTick(function()
             local KML = StaticFindObject("/Script/Engine.Default__KismetMaterialLibrary")
             local unlit, black = asset("/Paper2D/OpaqueUnlitSpriteMaterial.OpaqueUnlitSpriteMaterial"), asset("/Engine/EngineResources/Black.Black")
             if unlit and black then
-                local m = KML:CreateDynamicMaterialInstance(player, unlit, FName("None"))
+                local m = Core.dynMaterial(player, unlit)
                 m:SetTextureParameterValue(FName("SpriteTexture"), black)
                 wall.StaticMeshComponent:SetMaterial(0, m)
                 Thumbs.wall = "unlit"
             else
-                local m = KML:CreateDynamicMaterialInstance(player, asset("/Game/ModularBarInterior/Materials/Plastic/MI_Plastic_White.MI_Plastic_White"), FName("None"))
+                local m = Core.dynMaterial(player, asset("/Game/ModularBarInterior/Materials/Plastic/MI_Plastic_White.MI_Plastic_White"))
                 local dark = { R = 0, G = 0, B = 0, A = 1 }
                 m:SetVectorParameterValue(FName("Base Color"), dark)
                 m:SetVectorParameterValue(FName("Noise Color"), dark)
@@ -189,8 +189,8 @@ Core.onTick(function()
             if ok and fig then
                 pcall(function()
                     e.cam:K2_SetActorLocationAndRotation({ X = job.x - e.shot.dist, Y = job.y, Z = job.z + e.shot.up + Thumbs.lower(e.spec) }, { Pitch = e.shot.pitch or 0, Yaw = 0, Roll = 0 }, false, {}, true)
-                    for _, a in ipairs(fig.actors) do e.comp:ShowOnlyActorComponents(a) end
-                    if job.wall then e.comp:ShowOnlyActorComponents(job.wall) end
+                    for _, a in ipairs(fig.actors) do Core.call(e.comp, "ShowOnlyActorComponents", table.pack(a), table.pack(false)) end
+                    if job.wall then Core.call(e.comp, "ShowOnlyActorComponents", table.pack(job.wall), table.pack(false)) end
                 end)
                 job.items[#job.items + 1] = { entry = e, fig = fig }
             else
