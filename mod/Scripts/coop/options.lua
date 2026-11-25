@@ -256,6 +256,7 @@ local SETTINGS = {
     { key = "Time", sync = true, name = "Shared clock" },
     { key = "Objects", sync = true, name = "Containers, stashes, dead drops" },
     { key = "Homes", sync = true, name = "Hideouts" },
+    { key = "Labs", sync = true, name = "Drug labs" },
     { key = "Tags", sync = true, name = "Wall tags" },
     { key = "Spawns", sync = true, name = "Dropped items, placed furniture" },
     { key = "Clients", sync = true, name = "Clients" },
@@ -859,6 +860,9 @@ Core.onTick(function()
     render()
 end)
 
+-- (the height of the guests' line under the tabs, with its gap)
+local NOTE_H = 34
+
 local TABS = { { "settings", "SETTINGS" }, { "repair", "REPAIR" },
     { "tweaks", "TWEAKS" }, { "experimental", "EXPERIMENTAL" }, { "keys", "KEYBINDS" } }
 
@@ -936,23 +940,26 @@ render = function()
     -- A page taller than the room has a scroll bar, which takes its width from the rows:
     -- such a page is drawn again as wide as the rows plus the bar (the bar right of the
     -- red line's end), so that every page's rows end under the end of the red line.
+    -- guests: a line under the tabs saying the settings are the host's (the list is made
+    -- shorter by its height, so the panel stays the same size)
+    local listHeight = math.floor(H * 0.6)
+    if Options.tab == "settings" and World.active and World.role == "guest" then
+        local note = scr.text("Settings are the host's: changed here, most of them only count when you host.", "small", 14, YELLOW)
+        put(column, scr.sized(note, W), 12):SetHorizontalAlignment(1)
+        listHeight = listHeight - NOTE_H
+    end
+
     local scrollBox = scr.new("ScrollBox")
     local inner = scr.new("VerticalBox")
     scrollBox:AddChild(inner)
     scr.overflow = scr.overflow or {}
     local over = scr.overflow[Options.tab] == true
-    local ls = column:AddChildToVerticalBox(scr.sized(scrollBox, over and W + BAR or W, math.floor(H * 0.6)))
-    scr.list, scr.listTab, scr.listInner, scr.listHeight = scrollBox, Options.tab, inner, math.floor(H * 0.6)
+    local ls = column:AddChildToVerticalBox(scr.sized(scrollBox, over and W + BAR or W, listHeight))
+    scr.list, scr.listTab, scr.listInner, scr.listHeight = scrollBox, Options.tab, inner, listHeight
     -- (where the bar is across the picture, with some room to both sides: the column is in
     -- the middle and the bar is its right end)
     local right = U / 2 + (W + BAR) / 2
     scr.barStrip = over and { (right - BAR - 10) / U, (right + 14) / U } or nil
-
-    -- guests are told once that the settings are the host's
-    if Options.tab == "settings" and scr.toldTab ~= "settings" and World.active and World.role == "guest" then
-        pcall(Hud.toast, "Settings are the host's: changed here, most of them only count when you host", 6)
-    end
-    scr.toldTab = Options.tab
 
     local ok, e = xpcall(function()
         if Options.tab == "repair" then repairPage(inner)

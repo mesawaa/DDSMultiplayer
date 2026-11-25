@@ -71,10 +71,17 @@ local STORY_STATS = { expofactorlevel = true, reputationfactorlevel = true, risk
     exposalesamount = true, exposalesday = true, exposalesnight = true,
     expoeventname = true, expoeventsday = true, expoeventnight = true, deaobservationcountdown = true }
 
+-- What a hideout knows of its drug lab travels by coop/labs.lua, which also does what the
+-- game does when a lab comes on or goes off; taken in here as plain values it left a lab
+-- switched on in name only.
+local LAB_VARS = { labtypeid = true, labcrew = true, labproductiontimer = true, labproducedtotal = true,
+    productiononhold = true }
+
 -- True for a variable that is never exchanged between games.
 local function personal(className, name)
     local skip = PER_PLAYER[className]
     if skip and skip[name] then return true end
+    if LAB_VARS[name:lower()] and Core.enabled("Labs") then return true end
     if not Core.enabled("Story") then return false end
     if className == QUEST_CLASS then return not QUEST_SHARED[name:lower()] end
     if className == "gangManager_C" then return true end
@@ -226,11 +233,26 @@ local function refreshEquipment(obj)
 end
 Sync.refreshEquipment = refreshEquipment
 
+-- Called with an object before it is redrawn after a change from another game; one may
+-- return a function that is called afterwards. (Redrawing a container also tells whoever
+-- listens to it that its contents have changed: coop/labs.lua keeps a lab from taking the
+-- cost of a batch out of its cash box because of a change made in another game.)
+Sync.refreshGuards = {}
+
 local function refreshNearby(obj)
+    local undo = nil
+    for _, guard in ipairs(Sync.refreshGuards) do
+        local ok, fn = pcall(guard, obj)
+        if ok and type(fn) == "function" then
+            undo = undo or {}
+            undo[#undo + 1] = fn
+        end
+    end
     -- Containers repaint their open inventory window through this; other classes lack it.
     pcall(function() obj:resetContentSizes() end)
     pcall(function() obj:RamaLoaded() end)
     pcall(refreshEquipment, obj)
+    for _, fn in ipairs(undo or {}) do pcall(fn) end
 end
 
 ---------------------------------------------------------------- container contents

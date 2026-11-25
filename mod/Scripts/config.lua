@@ -151,6 +151,7 @@ return {
         Doors = true,     -- doors opened or closed by one player move for everyone
         Objects = true,   -- containers, stashes, dead drops, apartments and other saved objects
         Homes = true,     -- a hideout rented by one player is rented and open for everybody; the "new apartments" hint only when there are new ones
+        Labs = true,      -- drug labs (built in furniture mode) are the same in every game: the host's game makes the batches
         Tags = true,      -- a tag of your own (drawn) on the walls you spray; every wall shows its sprayer's tag in every game
         Spawns = true,    -- dropped items and cash, placed furniture; picking something up removes it for everyone
         Clients = true,   -- a client spawned for an order appears in both games, in the same spot

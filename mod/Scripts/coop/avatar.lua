@@ -473,27 +473,45 @@ for _, n in ipairs({ "MI_hair", "MI_hairJay", "MI_hair_01_dark", "MI_hair_02_blo
 end
 Avatar.HAIR_MATERIALS = HAIR_MATERIALS
 
+-- Colours the game has no material for: a game material (`from`) with other tint values
+-- (M_Base_GlobalTint's channels, linear colour), made per slot as a dynamic instance.
+local TINTS = {
+    -- the yellow sports sunglasses (MI_glass_dark2) in purple; its A channel is red and
+    -- shows through, so both are set
+    MI_glass_purple = { from = "MI_glass_dark2", vectors = {
+        ["R: Primary"] = { R = 0.05, G = 0.0, B = 0.25, A = 1 }, ["A: Details 3 / Skin"] = { R = 0.05, G = 0.0, B = 0.25, A = 1 } } },
+}
+Avatar.TINTS = TINTS
+
 local function applyColour(comp, colour)
     if not colour then return end
     local hair = HAIR_MATERIALS[colour] == true
     -- (a glasses frame's colour, "SK_ma_glass_03#MI_glass_dark2": on the frame's slots only,
     -- the lenses keep their glass)
     local frame = colour:sub(1, 8) == "MI_glass"
-    local m = asset(CLOTH .. (hair and "Eye_hair/" or "") .. colour .. "." .. colour)
+    local tint = TINTS[colour]
+    local base = tint and tint.from or colour
+    local m = asset(CLOTH .. (hair and "Eye_hair/" or "") .. base .. "." .. base)
     if not m then
         log("Outfit colour %s is not available", colour)
         return
+    end
+    local function put(i)
+        if not tint then return comp:SetMaterial(i, m) end
+        local d = comp:CreateDynamicMaterialInstance(i, m, FName("None"))
+        if not valid(d) then return end
+        for name, v in pairs(tint.vectors or {}) do d:SetVectorParameterValue(FName(name), v) end
     end
     for i = 0, comp:GetNumMaterials() - 1 do
         local cur = comp:GetMaterial(i)
         local n = valid(cur) and cur:GetFName():ToString() or ""
         if hair then
             local low = n:lower()
-            if low:find("hair", 1, true) or low:find("beard", 1, true) then comp:SetMaterial(i, m) end
+            if low:find("hair", 1, true) or low:find("beard", 1, true) then put(i) end
         elseif frame then
-            if n:sub(1, 8) == "MI_glass" then comp:SetMaterial(i, m) end
+            if n:sub(1, 8) == "MI_glass" then put(i) end
         elseif not n:find("skin", 1, true) and not n:find("_body_", 1, true) and not n:find("vest", 1, true) and not n:find("apron", 1, true)
-            and not n:find("hair", 1, true) and not n:find("eye", 1, true) then comp:SetMaterial(i, m) end
+            and not n:find("hair", 1, true) and not n:find("eye", 1, true) then put(i) end
     end
 end
 

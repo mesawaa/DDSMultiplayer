@@ -8,7 +8,7 @@ local json = require("json")
 
 local Net = {}
 
-local PROTOCOL = 27         -- 27: v0.19 tags (three a player, wide ones, coats, colours of their own)
+local PROTOCOL = 28         -- 28: v0.19.6 drug labs are one for everybody (a game without that would run its own)
 local VERSION = "?"
 pcall(function() VERSION = require("core").VERSION end)
 

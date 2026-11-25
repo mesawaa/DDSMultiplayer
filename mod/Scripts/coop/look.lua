@@ -205,6 +205,9 @@ local M_GLASSES = {
     { name = "Sports sunglasses", mesh = "SK_ma_glass_03#MI_glass_dark2", price = 2000 },
     { name = "Black frames", mesh = "SK_ma_glass_04#MI_glass_01", price = 200, shop = "formal" },
     { name = "Rectangle glasses", mesh = "SK_ma_glass_05#MI_glass_01", price = 200, shop = "formal" },
+    -- (a colour of the mod's own, Avatar.TINTS; owned glasses are kept by place in this list,
+    -- so new ones go at the end)
+    { name = "Sports sunglasses", mesh = "SK_ma_glass_03#MI_glass_purple", price = 2000 },
 }
 -- Watches: the game's two watch models, worn on the left wrist by men and women alike
 -- (coop/avatar.lua). What a player owns of them is kept as "w1", "w2". None to begin with.
