@@ -1,6 +1,7 @@
 -- Shared XP: every XP gain goes through statisticsManager_C:addExp(expAmount). Gains from
--- sales, dead drops and regular tasks are sent to the other players; storyline task XP
--- (recognised through questManager_C:markTaskStatus) stays with the player who earned it.
+-- sales, dead drops, regular tasks and the psychedelic gang's tasks are sent to the other
+-- players; storyline task XP (recognised through questManager_C:markTaskStatus) stays with
+-- the player who earned it.
 
 local Core = require("core")
 local Net = require("net")
@@ -49,11 +50,14 @@ local STORY_KEYS = {
     "TASK-ENDGAME-BOMBS-NAM", "TASK-ENDGAME-FUNERAL-NAM", "TASK-ENDGAME-GOODS-NAM",
     "TASK-ENDGAME-BASS-NAM", "TASK-ENDGAME-GREENE2-NAM", "TASK-ENDGAME-LAB-NAM",
     "TASK-ENDGAME-SICARIO1-NAM", "TASK-ENDGAME-TAPGSM", "TASK-PSYCHEDELIC-ENDGAME-NAME",
-    "TASK-PSYCH-RAT-TITLE", "TASK-PSYCH-EVIDENCE-TITLE", "TASK-GANG-FINALISE-NAME",
+    "TASK-GANG-FINALISE-NAME",
 }
 
--- Repeatable everyday tasks. Their XP is shared.
+-- Tasks whose XP is shared: repeatable everyday tasks, and the psychedelic gang's tasks
+-- (the gang is one for the whole world, and any player may do its steps).
 local REGULAR_KEYS = {
+    "TASK-PSYCH-RAT-TITLE",      -- envelopes, the minion's details
+    "TASK-PSYCH-EVIDENCE-TITLE", -- the police archive: virus, documents
     "TASK-CLIENT-NAM",      -- client order (sale / dead drop delivery)
     "TASK-DEALER-CASH-NAM", -- collect cash from a dealer
     "TASK-CASH-EDDIE-NAM",  -- pay Eddie

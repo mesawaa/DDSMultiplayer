@@ -1,6 +1,6 @@
-DDS1 Co-op - YOUR OWN MUSIC addon 1.1 (optional)
+DDS1 Co-op - YOUR OWN MUSIC addon 1.2 (optional)
 
-Needs DDS1 Co-op 0.19.5 or later installed first.
+Needs DDS1 Co-op 0.19.7 or later installed first.
 
 INSTALL
 Extract this zip into the game's folder

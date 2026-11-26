@@ -174,6 +174,24 @@ function Repl.export(obj, names)
     return out
 end
 
+-- The export leaves an empty array out of a struct's text (see structExporter). ImportText
+-- only sets the fields the text names, so a struct that held something kept its old array:
+-- a jar another player had emptied still held its drug here, at 0 g. So the arrays the text
+-- does not name are emptied first (also those of structs inside the struct).
+local function clearUnnamedArrays(struct, value, text)
+    struct:ForEachProperty(function(p)
+        local name = p:GetFName():ToString()
+        local t = typeName(p)
+        local at = text:find(name .. "=", 1, true)
+        if t == "ArrayProperty" and not at then
+            pcall(function() value[name]:Empty() end)
+        elseif t == "StructProperty" and at then
+            local inner = text:sub(at + #name + 1)
+            pcall(clearUnnamedArrays, p:GetStruct(), value[name], inner)
+        end
+    end)
+end
+
 -- Sets variables of obj from name -> text. Returns how many were applied.
 function Repl.import(obj, values)
     local applied = 0
@@ -186,6 +204,9 @@ function Repl.import(obj, values)
                 if text == "()" then
                     holder[entry.name]:Empty()   -- importing "()" would leave one default element
                 else
+                    if typeName(entry.prop) == "StructProperty" and text:sub(1, 1) == "(" then
+                        clearUnnamedArrays(entry.prop:GetStruct(), holder[entry.name], text)
+                    end
                     -- 2 = PPF_Delimited: top-level strings are quoted like nested ones
                     entry.prop:ImportText(text, entry.prop:ContainerPtrToValuePtr(holder), 2, holder)
                 end

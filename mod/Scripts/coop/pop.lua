@@ -841,6 +841,85 @@ local function releaseHeldPlayer()
     end
 end
 
+-- The game keeps a count of the officers chasing the player (`chasingPolicemen`, the list
+-- in `chasingPolicemenRef`). While it is above nought, every officer who gets sight of the
+-- player gives chase at once: at any hour, fugitive or not. The game counts again only when
+-- an officer starts or finishes a chase, and then counts every officer whose blackboard says
+-- "chase", whoever it is after. In co-op that count goes wrong:
+--   * an officer this module removes in the middle of a chase (its owner removed it or left,
+--     the street went over to another game's population) never finishes it;
+--   * an officer that another game drives stands still here with its chase still on, and
+--     every count the game makes takes it in again;
+--   * an officer whose chase ends counts again only if it knows the player (`playerRef`, set
+--     when it sees the player or by its behaviour tree): a copy whose tree this module had
+--     stopped, or a lead its partner pulled into the chase, ends it and the count stays.
+-- So once a second, while the count is above nought, the officers on the list that no
+-- longer exist, whose chase is not run in this game, or whose blackboard no longer says
+-- "chase" (only the game's finishChasing turns it off) are taken off it. At nought the chase
+-- ends as the game ends it,
+-- and the player is marked a fugitive (an escaped chase) only when one of the officers taken
+-- off was after them here a moment before, not when the count only held officers of another
+-- player's chase.
+Pop.stats.recounts = 0
+local lastRealChaseAt = -100
+local CHASE_KEY = nil
+
+local function chaseOn(npc)
+    local ok, on = pcall(function()
+        CHASE_KEY = CHASE_KEY or FName("chase")
+        local bb = ai():GetBlackboard(npc)
+        return valid(bb) and bb:GetValueAsBool(CHASE_KEY)
+    end)
+    return ok and on == true
+end
+
+-- Whether this game runs the chase of this officer (and so its chase is after our player).
+local function chaseIsHere(npc)
+    local _, c = copyOf(npc)
+    if c then return c.engaged == true end
+    local _, e = ownedOf(npc)
+    if e and e.driver and not e.localChase then return false end
+    return true
+end
+
+local function recountChasers()
+    local player = World.player()
+    if not player then return end
+    local count, refs = 0, nil
+    pcall(function()
+        count = player.chasingPolicemen
+        refs = player.chasingPolicemenRef
+    end)
+    if type(count) ~= "number" or count <= 0 or refs == nil then return end
+    local keep, dropped, listed = {}, 0, 0
+    pcall(function()
+        refs:ForEach(function(_, elem)
+            listed = listed + 1
+            local ok, cop = pcall(function() return elem:get() end)
+            if ok and Core.alive(cop) and chaseIsHere(cop) and chaseOn(cop) then keep[#keep + 1] = cop else dropped = dropped + 1 end
+        end)
+    end)
+    -- an officer of the list that was after this player here
+    if #keep > 0 then lastRealChaseAt = os.clock() end
+    if dropped == 0 and listed == count then return end
+    local wasReal = os.clock() - lastRealChaseAt <= 3 or #keep > 0
+    pcall(function() player.chasingPolicemen = #keep end)
+    pcall(function()
+        player.chasingPolicemenRef:Empty()
+        for i, cop in ipairs(keep) do player.chasingPolicemenRef[i] = cop end
+    end)
+    local fugitive = false
+    if #keep == 0 then
+        pcall(function() player:endChaseMusic() end)
+        local caught = true
+        pcall(function() caught = player.beenCaught == true end)
+        if not caught and wasReal then fugitive = pcall(function() player:markAsFugitive() end) end
+    end
+    Pop.stats.recounts = Pop.stats.recounts + 1
+    log("Pop: officers that are gone, chase elsewhere or have ended their chase taken off the count (%d listed, count %d, now %d)%s",
+        listed, count, #keep, fugitive and "; the chase is over: fugitive" or "")
+end
+
 ---------------------------------------------------------------- potential clients are used up for everybody
 
 -- A potential client who was given a sample (or sent away) in one game walks off there.
@@ -982,6 +1061,11 @@ Core.every(1, function()
     if World.shared() and Core.enabled("Population") then
         releaseCalmOfficers()
         releaseHeldPlayer()
+    end
+    -- (also after the shared world: the copies removed when it ended may have been chasing)
+    if Core.enabled("Population") then
+        local ok, e = pcall(recountChasers)
+        if not ok then log("Pop: counting chasers failed: %s", tostring(e)) end
     end
 end)
 

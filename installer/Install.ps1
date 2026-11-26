@@ -3,7 +3,7 @@
 # "downloaded from the internet" mark from the copied files, and checks the result.
 param([string]$Target = "", [switch]$DetectOnly)
 
-$version = "0.19.6"
+$version = "0.19.7"
 $exe = "DrugDealerSimulator-Win64-Shipping.exe"
 $rel = "steamapps\common\DrugDealerSimulator\DrugDealerSimulator\Binaries\Win64"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path

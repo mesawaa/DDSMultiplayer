@@ -233,6 +233,9 @@ local function refreshEquipment(obj)
 end
 Sync.refreshEquipment = refreshEquipment
 
+-- Called with an object just before a change from another game is put into it.
+Sync.beforeApply = {}
+
 -- Called with an object before it is redrawn after a change from another game; one may
 -- return a function that is called afterwards. (Redrawing a container also tells whoever
 -- listens to it that its contents have changed: coop/labs.lua keeps a lab from taking the
@@ -659,6 +662,7 @@ Repl.on("st", function(sender, data)
     local transform = Sync.transform[className]
     if transform then transform.inc(values) end
     applying = true
+    Sync.applyingFrom = sender      -- (for the refresh guards: who made the change)
     local senderRows = nil   -- set when our contents differ from the sender's after merging
     local kept = nil         -- manager arrays where we hold something the sender does not
     local ok, e = pcall(function()
@@ -673,6 +677,7 @@ Repl.on("st", function(sender, data)
         if manager and (type(data.ix) == "table" or type(data.lg) == "table") then
             kept = mergeManager(obj, className, values, data)
         end
+        for _, fn in ipairs(Sync.beforeApply) do pcall(fn, obj) end
         Repl.import(obj, values)
         if manager then
             if manager.refresh then manager.refresh(obj, values) end
@@ -681,6 +686,7 @@ Repl.on("st", function(sender, data)
         end
     end)
     applying = false
+    Sync.applyingFrom = nil
     if not ok then log("Sync: applying %s failed: %s", data.id, tostring(e)) end
     -- Our own export of the new values becomes the baseline, so they are not echoed back.
     local t = tracked[data.id] or { base = {} }
