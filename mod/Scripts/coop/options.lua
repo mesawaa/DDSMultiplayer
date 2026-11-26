@@ -227,7 +227,7 @@ local CONFIG = Core.MOD_DIR .. "/Scripts/config.lua"
 -- group's title line, after its grey words; `choices` = the words a setting goes through.
 local SETTINGS = {
     -- the storyline switch is near the top: switching it off is how quests are shared
-    { group = "STORY", note = "after a restart; every player the same" },
+    { group = "STORY", note = "after a restart; the host's counts" },
     { key = "Story", sync = true, name = "Independent story",
         desc = "ON: every player has their own quests and level of the story. OFF: one storyline for everybody, the quests are shared." },
     { group = "CO-OP" },
@@ -632,7 +632,11 @@ local function settingsPage(inner)
             local v = current(s)
             local controls = {}
             local sub, subColor = s.desc, nil
-            if s.sync and v ~= Core.enabled(s.key) then
+            if s.sync and World.hostSyncInUse and World.hostSyncInUse() then
+                if v ~= Core.enabled(s.key) then
+                    sub, subColor = (s.desc and (s.desc .. "  ") or "") .. "The host's setting counts in this world.", YELLOW
+                end
+            elseif s.sync and v ~= Core.enabled(s.key) then
                 sub, subColor = (s.desc and (s.desc .. "  ") or "") .. "Changes after a restart.", YELLOW
             end
             if s.choices then

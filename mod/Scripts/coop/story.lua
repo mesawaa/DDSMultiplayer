@@ -1090,7 +1090,21 @@ World.listen("stop", function(role)
 end)
 
 Core.every(STEP, function()
-    if not enabled() or not World.active then return end
+    if not World.active then return end
+    if not enabled() then
+        -- One storyline: nothing of the separate stories runs, but a package put back by
+        -- RELOAD made the first package's dead drop this player's own, and it has to be
+        -- everybody's again once taken (it stayed private, and Eddie's packages put into
+        -- that drop, the supermarket's, never showed in this game).
+        if drop.private then
+            local q = manager()
+            if q then
+                local ok, e = pcall(tendFirstPackage, q)
+                if not ok then log("Story: %s", tostring(e)) end
+            end
+        end
+        return
+    end
     local q = manager()
     if not q then return end
     if World.role == "guest" and not ready then
@@ -1142,8 +1156,10 @@ end)
 -- In that
 -- case these few variables are kept by themselves: sent to the host when they change,
 -- stored in the guest's record beside the host's saves (`sheet`, coop/guests.lua), and put
--- back on arrival. A guest the host has nothing for starts from what the host's save
--- holds, as it always did with one storyline for everybody, and keeps it from there.
+-- back on arrival. A guest the host has nothing for is at the level the save is at (the
+-- storyline is the same for everybody) with every skill as in a new game and all the
+-- skill points of that level to spend: the game's points at the start and its points per
+-- level for every level after the first. (They used to get the host's skills as well.)
 Net.on("soff", function(sender)
     if World.role == "guest" and sender == (World.host or Net.S.owner) and not ready then plain.hostOff = true end
 end)
@@ -1168,6 +1184,25 @@ local function plainNames(s)
     return out
 end
 
+-- A new player in this save: skills as in a new game, the points of the level unspent.
+-- Returns the number of points, or nil when the game's defaults could not be read.
+local STATS_CDO = "/Game/Interactive/statisticsManager.Default__statisticsManager_C"
+local function freshSheet(s)
+    local cdo = StaticFindObject(STATS_CDO)
+    if not valid(cdo) then return nil end
+    local names = {}
+    for _, name in ipairs(plainNames(s)) do
+        if name:sub(1, 10) == "skillLevel" then names[#names + 1] = name end
+    end
+    local level = math.floor(tonumber(s.playerLevel) or 1)
+    local first = math.floor(tonumber(cdo.playerLevel) or 1)
+    local per = math.floor(tonumber(s.playerSkillPointsPerLevel) or tonumber(cdo.playerSkillPointsPerLevel) or 0)
+    local points = math.floor(tonumber(cdo.playerSkillPoints) or 0) + math.max(0, level - first) * per
+    for _, name in ipairs(names) do s[name] = tonumber(cdo[name]) or 0 end
+    s.playerSkillPoints = points
+    return points
+end
+
 local function tendPlain()
     local s = Repl.singleton("statisticsManager_C")
     if not s then return end
@@ -1184,11 +1219,17 @@ local function tendPlain()
             end
             n = Repl.import(s, filtered)
         end
+        local fresh = nil
+        if n == 0 then
+            local ok, points = pcall(freshSheet, s)
+            if ok then fresh = points else log("Story: %s", tostring(points)) end
+        end
         plain.ready = true
         local function f(v) return string.format("%.0f", tonumber(v) or -1) end
         log("Story: one storyline for everybody (%s); your level %s and skills are %s: lock picking %s, pockets %s, stamina %s, runner %s, stealth %s, illusionist %s, salesman %s, quick learner %s; %s point(s) to spend",
-            plain.hostOff and enabled() and "the host's setting" or "Sync.Story or Sync.Orders is off", tostring(s.playerLevel),
-            n > 0 and "your own again, as the host had them stored" or "those of the host's save (the host had none stored for you)",
+            ((plain.hostOff and enabled()) or (World.hostSyncInUse and World.hostSyncInUse())) and "the host's setting" or "Sync.Story or Sync.Orders is off", tostring(s.playerLevel),
+            n > 0 and "your own again, as the host had them stored" or (fresh and "new: the host had none stored for you, every skill point is yours to spend"
+                or "those of the host's save (the host had none stored for you; the game's defaults could not be read)"),
             f(s.skillLevelLockpick), f(s.skillLevelPockets), f(s.skillLevelStamina), f(s.skillLevelRunner), f(s.skillLevelStealth), f(s.skillLevelIllusionist),
             f(s.skillLevelSalesman), f(s.skillLevelQuickLearner), tostring(s.playerSkillPoints))
         return
@@ -1206,6 +1247,17 @@ Core.every(2, function()
 end)
 
 Story.firstMeetingSeat, Story.firstMeetingEddie = firstMeetingSeat, firstMeetingEddie
+
+-- The first package's dead drop is everybody's again at once: an order of Eddie's has
+-- been put into it (coop/eddie.lua). Left this player's own, the package stayed in the
+-- other games only.
+function Story.shareDrop(key)
+    if not drop.private or (key ~= nil and key ~= drop.key) then return false end
+    drop.private, drop.again = false, nil
+    Sync.setPrivate(drop.key, false)
+    log("Story: the first package's dead drop is shared again (an order of Eddie's is in it)")
+    return true
+end
 
 ---------------------------------------------------------------- reloading a step (coop/options.lua)
 
@@ -1232,6 +1284,9 @@ local function packageAgain(q)
     if ok then drop.given, drop.again = true, os.clock() + 5 end
     return ok and holdsDrugs(d)
 end
+
+-- (for test scripts) the first package put back as by RELOAD
+function Story.packageAgain() local q = manager() return q ~= nil and packageAgain(q) end
 
 -- What the pockets hold of a first package (drugs of the package's kinds).
 local function carriesPackage()

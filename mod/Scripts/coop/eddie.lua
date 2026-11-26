@@ -282,6 +282,9 @@ Core.Hooks.add(ORDER .. ":spawnOrderPackage", function(ctx)
     Core.after(1.0, function()
         if not World.shared() or not Core.alive(container) then return end
         pcall(function()
+            -- (the first package's drop may be this player's own just now: coop/story.lua)
+            local Story = package.loaded["coop.story"]
+            if Story and Story.shareDrop then Story.shareDrop(Repl.key(container)) end
             require("coop.sync").pushObject(container)
             local l = container:K2_GetActorLocation()
             -- ("t" is taken: it carries the kind of every message)
@@ -296,6 +299,9 @@ Net.on("epkg", function(sender, data)
     if not World.active or not Core.enabled("Orders") then return end
     if World.role == "host" and not World.inWorld[sender] then return end
     if World.role == "guest" and sender ~= hostId() then return end
+    -- the drop the package is in is everybody's (this game may hold it as its own first-package drop)
+    local Story = package.loaded["coop.story"]
+    if Story and Story.shareDrop and type(data.k) == "string" then Story.shareDrop(data.k) end
     local task = tonumber(data.task)
     if task and task > 0 and not packages[task] and tonumber(data.x) then
         packages[task] = Hud.mapMarker("Dead drop package", "Eddie's delivery: " .. tostring(data.nm or "dead drop"), data.x, data.y, data.z, Hud.MARKER_PLAYER)

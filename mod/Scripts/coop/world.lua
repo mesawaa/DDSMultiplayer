@@ -124,7 +124,63 @@ local function stop(reason)
     World.gone = Core.player() == nil
     fire("stop", role)
     World.gone = false
+    World.ownSync()
 end
+
+---------------------------------------------------------------- the host's switches
+
+-- How a world is shared (the Sync table of config.lua: one storyline or one each, which
+-- things are exchanged) is the host's to say. Each game used to go by its own switches,
+-- and a guest whose "Independent story" was off played one storyline in a host's world
+-- of separate ones: it took the host's level and skills as its own. The host sends its
+-- switches with the world; a guest's game uses them in that world and its own again
+-- afterwards. Nothing is written to the guest's settings. Two switches stay each
+-- player's own: World (whether others may load this player's world) and Avatars.
+local OWN_SYNC = { World = true, Avatars = true }
+local ownSync = nil     -- guest in a host's world: key -> { v = this game's own value (may be nil) }
+
+function World.hostSync()
+    local out = {}
+    for key in pairs(type(Core.config.Sync) == "table" and Core.config.Sync or {}) do
+        if type(key) == "string" and not OWN_SYNC[key] then out[key] = Core.enabled(key) end
+    end
+    return out
+end
+
+-- Back to this game's own switches (nothing to do when the host's were not in use).
+function World.ownSync()
+    if not ownSync then return end
+    local cfg = Core.config.Sync
+    if type(cfg) == "table" then
+        for key, own in pairs(ownSync) do cfg[key] = own.v end
+    end
+    ownSync = nil
+    log("Settings: your own co-op switches count again")
+end
+
+local function useHostSync(sync)
+    World.ownSync()
+    if type(sync) ~= "table" then return end
+    if type(Core.config.Sync) ~= "table" then Core.config.Sync = {} end
+    local cfg = Core.config.Sync
+    local saved, differ = {}, {}
+    for key, v in pairs(sync) do
+        if type(key) == "string" and type(v) == "boolean" and not OWN_SYNC[key] then
+            if Core.enabled(key) ~= v then differ[#differ + 1] = key .. (v and " on" or " off") end
+            saved[key] = { v = cfg[key] }
+            cfg[key] = v
+        end
+    end
+    ownSync = saved
+    if #differ > 0 then
+        table.sort(differ)
+        log("Settings: the host's co-op switches count in this world (yours differ: %s)", table.concat(differ, ", "))
+    end
+end
+World.useHostSync = useHostSync
+
+-- (for the MOD OPTIONS screen) true while the host's switches are in use
+function World.hostSyncInUse() return ownSync ~= nil end
 
 ---------------------------------------------------------------- host side
 
@@ -172,7 +228,8 @@ local function sendWorld(target)
         if stable >= 2 then
             local difficulty = 0
             pcall(function() difficulty = Core.find("difficultyManager_C").curDifficulty end)
-            Net.send("world_info", { difficulty = difficulty, size = size, proto = Net.PROTOCOL, v = Net.VERSION, epoch = World.epoch }, target)
+            Net.send("world_info", { difficulty = difficulty, size = size, proto = Net.PROTOCOL, v = Net.VERSION, epoch = World.epoch,
+                sync = World.hostSync() }, target)
             Net.sendFile("world", path, target)
             log("World sent to %s (%d bytes)", Net.name(target), size)
             done()
@@ -364,6 +421,7 @@ Net.onFile("world", function(sender, path)
     World.joining.stage = "loading"
     World.joining.startedAt = os.time()
     World.joining.epoch = pendingInfo and pendingInfo.epoch or nil
+    useHostSync(pendingInfo and pendingInfo.sync or nil)
     -- From here on what gets loaded is somebody else's world, whatever happens to the
     -- join: nothing this game saves may reach the player's own slots.
     World.foreign, foreignAt = true, os.time()
@@ -499,8 +557,11 @@ Core.every(1, function()
     end
 end)
 
--- The loaded world contains a copy of the host's character. A guest keeps the keys but
--- starts with empty pockets, otherwise every join would duplicate the host's goods.
+-- The loaded world contains a copy of the host's character. A guest starts with empty
+-- pockets and no backpack, otherwise every join would duplicate the host's goods: what a
+-- guest has carried in this world before is put back afterwards (World.restorePockets).
+-- (Keys used to be kept, and with them the backpack the host wore, in which they were:
+-- every new player had the save's backpack and a second copy of its story keys.)
 emptyGuestInventory = function()
     local player = World.player()
     if not player then return end
@@ -514,29 +575,31 @@ emptyGuestInventory = function()
         })
         Repl.importRaw(player, "backpackItemContents", "()")
         -- What the character carries is held by its inventory component: one row per
-        -- item across several arrays. Every row goes except keys.
+        -- item across several arrays. Every row goes, and the backpack worn.
         local names = {}
         for _, name in ipairs(Repl.savedVars(player)) do
             if name:sub(1, 19) == "InventoryComponent." then names[#names + 1] = name end
         end
         local values = Repl.export(player, names)
         local itemNames = Repl.splitArray(values["InventoryComponent.ItemNames"] or "()")
-        local keep, removed = {}, 0
-        for i, item in ipairs(itemNames) do
-            if item:upper():find("KEY", 1, true) then keep[#keep + 1] = i else removed = removed + 1 end
-        end
+        local removed = #itemNames
+        local worn = values["InventoryComponent.CurBackpackID"]
         if removed > 0 then
             local out = {}
             for name, text in pairs(values) do
                 local e = text:sub(1, 1) == "(" and Repl.splitArray(text) or {}
-                if text:sub(1, 1) == "(" and #e == #itemNames then
-                    local kept = {}
-                    for _, i in ipairs(keep) do kept[#kept + 1] = e[i] end
-                    out[name] = Repl.joinArray(kept)
-                end
+                if text:sub(1, 1) == "(" and #e == #itemNames then out[name] = "()" end
             end
             Repl.import(player, out)
             log("Guest starts with empty pockets (%d item(s) of the host's character removed)", removed)
+        end
+        -- The backpack worn goes the game's own way (clearBackpack: hasBackpack, the bag's
+        -- grid, the inventory screen's bag panel); the bare variable left the game thinking a
+        -- medium bag was still on.
+        if type(worn) == "string" and worn ~= "None" and worn ~= '"None"' and worn ~= "" and worn ~= '""' then
+            local okClear = pcall(function() player:clearBackpack() end)
+            if not okClear then pcall(function() player.InventoryComponent:UpdateBackpack(FName("None"), false) end) end
+            log("Guest starts without the host's character's backpack (%s)", worn)
         end
         pcall(function() player:refreshBackpackData() end)
     end)
@@ -682,6 +745,14 @@ function World.restorePockets(stored)
         end
         Repl.import(player, out)
         if type(p.contents) == "string" then Repl.importRaw(player, "backpackItemContents", p.contents) end
+        -- the bag this player wore: through the game's UpdateBackpack, which also sets the
+        -- bag's grid and (by its BackpackChanged event) hasBackpack
+        local bag = tostring(p.vars["InventoryComponent.CurBackpackID"] or ""):gsub('^"', ""):gsub('"$', "")
+        local vendor = tostring(p.vars["InventoryComponent.CurBackpackVendor"] or "") == "True"
+        if bag ~= "" then
+            pcall(function() player.InventoryComponent:UpdateBackpack(FName(bag), vendor) end)
+            pcall(function() player:updateBackpackMovementChange() end)
+        end
         pcall(function() player:refreshBackpackData() end)
         log("Guest gets back what they carried when they last left this world (%d item row(s))", #saved)
     end)

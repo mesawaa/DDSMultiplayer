@@ -44,6 +44,14 @@ Third.tune = {
 
 local rig = nil     -- { owner, pc, camera, cameraAddr, figure, back, since, arms }
 local KSL = nil
+-- The first-person arms this module has hidden, apart from any one view from behind: the
+-- record of a view could be dropped while they were hidden (the player not found for a
+-- moment), and the next view found them hidden already, took them for the game's doing
+-- and never showed them again. Tab then raised a phone in a hand nobody could see, for
+-- the rest of the session. { owner = address, player = the actor, after = os.clock() }
+local hidden = nil
+local armsCheckAt, armsGoneSince = 0, nil
+local tendArms
 
 local function address(o)
     local a = nil
@@ -139,6 +147,9 @@ local function hideArms(r, player)
         if valid(arms) and arms:IsVisible() then
             arms:SetVisibility(false, true)
             r.arms = true
+            hidden = { owner = address(player), player = player, after = 0 }
+        elseif hidden and hidden.owner == address(player) then
+            r.arms = true       -- hidden by this module before: still its to show again
         end
     end)
 end
@@ -152,11 +163,41 @@ local function showPhone(player, show)
     end)
 end
 
+-- In the game's own view, with the player in control of their character and using nothing,
+-- the first-person arms are always there (the game hides them only while another pawn is
+-- controlled: a bench, a sewer exit). Arms that stay hidden then for a second are shown
+-- again, whatever hid them: Tab would raise a phone in an invisible hand.
+function tendArms(player)
+    local ok = pcall(function()
+        if hidden and os.clock() < hidden.after then return end
+        local arms = player.fpsArms
+        if not valid(arms) or arms:IsVisible() then
+            armsGoneSince = nil
+            if hidden and hidden.owner == address(player) then hidden = nil end
+            return
+        end
+        local pc = player:GetController()
+        if not pc or not valid(pc) or viewTarget(pc) ~= address(player) or occupied(player) then
+            armsGoneSince = nil
+            return
+        end
+        armsGoneSince = armsGoneSince or os.clock()
+        if os.clock() - armsGoneSince < 1.0 then return end
+        arms:SetVisibility(true, true)
+        showPhone(player, player.phoneUp == true)
+        log("Third person: the first-person arms were hidden in the game's own view (%s) and are shown again",
+            (hidden and hidden.owner == address(player)) and "hidden by the view from behind" or "hidden by something else")
+        armsGoneSince, hidden = nil, nil
+    end)
+    if not ok then armsGoneSince = nil end
+end
+
 -- `quick`: the way back to the head is short (the phone comes up: its hand is already rising)
 local function leave(giveViewBack, quick)
     local r = rig
     rig = nil
     if not r then return end
+    if hidden then hidden.after = os.clock() + 0.6 end
     Avatar.sendYaw = nil
     if World.gone then return end
     local player = World.player()
@@ -185,6 +226,7 @@ local function leave(giveViewBack, quick)
             if now and address(now) == r.owner then
                 now.fpsArms:SetVisibility(true, true)
                 showPhone(now, now.phoneUp == true)
+                hidden = nil
             end
         end)
     end
@@ -229,12 +271,18 @@ end
 Core.onTick(function(dt)
     if not live() then return end
     local player = World.player()
-    if rig and (not player or address(player) ~= rig.owner) then
+    -- (the player not found for a moment is not another world: the view stays as it is)
+    if not player then return end
+    if rig and address(player) ~= rig.owner then
         rig = nil               -- another world: its actors went with it
         Avatar.sendYaw = nil
+        hidden = nil
     end
-    if not player then return end
     local r = rig
+    if not r and os.clock() >= armsCheckAt then
+        armsCheckAt = os.clock() + 0.5
+        tendArms(player)
+    end
     if not r then
         if not wanted(player) then return end
         local pc = nil

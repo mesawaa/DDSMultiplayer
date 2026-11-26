@@ -21,6 +21,15 @@
 --     moment they are made, in the host's game as well: left in, the host's three raced
 --     the ones made here for the same clients and one of the two was lost. (A host who
 --     fetched the package before anybody joined has the game's own three, which fit.)
+--
+-- With one storyline for everybody the quest is shared and so are the orders its story
+-- sends: there is nothing to hand to the host. But a first package can still be fetched
+-- when the world has had orders before (a second player's, after RELOAD of the step), and
+-- the game's rule then made "4 g" orders for a package of 3 g. So in that case each of the
+-- three orders the story sends after a first package is looked at as it is made: one that
+-- the rule did not make the right way is taken back and made again, at once and for the
+-- same client, with the order list shortened as above (the first two as the first order
+-- of a world, the third as its third).
 
 local Core = require("core")
 local Net = require("net")
@@ -61,6 +70,12 @@ local function enabled()
     return Core.enabled("Story") and Core.enabled("Orders")
 end
 
+-- One storyline for everybody (coop/story.lua): the story's orders are mended in place.
+local function oneStoryline()
+    return Core.enabled("Orders") and Story.oneStoryline ~= nil and Story.oneStoryline() == true
+end
+local storyOrders = 0       -- orders the story has sent since this game's first package (one storyline)
+
 local function sales() return Repl.singleton("salesManager_C") end
 local function computer() return Repl.singleton("mainComputer_C") end
 
@@ -87,6 +102,14 @@ end
 -- its element of every list, the client's message about it, and what the client and its
 -- contact remember about having asked. Nothing has been sent to anybody yet: this runs in
 -- the same frame as the game function that made it.
+-- The length of every order list (in a world played for long they are not all the same).
+local function lengths(s)
+    local out = {}
+    for _, name in ipairs(ORDER) do out[name] = #get(s, name) end
+    return out
+end
+local lastLens = nil        -- lengths() as they were before the newest order
+
 local function takeBack(s)
     local ids = get(s, "orderListClientID")
     local L = #ids
@@ -98,8 +121,10 @@ local function takeBack(s)
     local lists = {}
     for _, name in ipairs(ORDER) do
         local e = get(s, name)
-        if #e ~= L then return false end
-        e[L] = nil
+        -- (each list has grown by the one order; without lengths from before, all must be as long)
+        local before = lastLens and lastLens[name]
+        if (before and #e ~= before + 1) or (not before and #e ~= L) or #e == 0 then return false end
+        e[#e] = nil
         lists[name] = e
     end
     -- the order this client had before, if any
@@ -159,30 +184,71 @@ local function takeBack(s)
 end
 
 Core.Hooks.add(QM_PATH .. ":retrievedFirstPackage", function()
-    if not World.active or not enabled() then return end
+    if not World.active or not (enabled() or oneStoryline()) then return end
     windowUntil = os.clock() + WINDOW
+    storyOrders = 0
     local s = sales()
     if s then
         lastLen = count(s)
+        lastLens = lengths(s)
         firstNewest = get(s, "clientsNewestOrderID")
     end
 end)
 
+local issue     -- (below: has the game make an order as if the list were shorter)
+
+-- One storyline: the story's order that was just made (the list was `before` long when it
+-- was) is made again the way a first package needs, if the game's rule did not.
+local function mend(s, before)
+    if os.clock() > windowUntil then return end
+    -- (the story asks clients 0, 1 and 2; an order of the usual business may come between)
+    local ids = get(s, "orderListClientID")
+    local client = tonumber(ids[#ids])
+    if not client or client < 0 or client > 2 then return end
+    storyOrders = storyOrders + 1
+    local want = storyOrders <= 2 and 0 or (storyOrders == 3 and 2 or nil)
+    if want == nil or before == want then return end
+    if not takeBack(s) then
+        log("First sales: the story's order %d for client %d could not be taken back", storyOrders, client)
+        return
+    end
+    local made, why = issue(s, client, want)
+    if made then
+        Desk.stats.issued = Desk.stats.issued + 1
+        log("First sales: the story's order %d for client %d was made again to fit a first package", storyOrders, client)
+    else
+        Desk.stats.failed = Desk.stats.failed + 1
+        log("First sales: the story's order %d for client %d could not be made again (%s)", storyOrders, client, tostring(why))
+    end
+end
+
 Core.Hooks.add(SALES_PATH .. ":clientSendNewOrder", function(ctx)
-    if busy or not World.active or not enabled() then return end
+    if busy or not World.active then return end
+    local one = not enabled() and oneStoryline()
+    if not enabled() and not one then return end
     local s = ctx:get()
     if not valid(s) then return end
     local n = count(s)
     local grew = n ~= nil and lastLen ~= nil and n > lastLen
+    local before = lastLen
     lastLen = n
     if not grew then return end
+    if one then
+        local ok, e = pcall(mend, s, before)
+        if not ok then
+            busy = false
+            log("First sales: %s", tostring(e))
+        end
+        lastLen, lastLens = count(s), lengths(s)
+        return
+    end
     -- A guest's game makes no orders of its own (its sales manager is off): what gets here
     -- are the three calls of its story. In the host's game the same three calls come
     -- within the window after its first package; anything later is the usual business.
     if World.role == "host" and os.clock() > windowUntil then return end
     local ok, e = pcall(takeBack, s)
     if not ok then log("First sales: %s", tostring(e)) end
-    lastLen = count(s)
+    lastLen, lastLens = count(s), lengths(s)
 end)
 
 ---------------------------------------------------------------- what a player still has to sell
@@ -226,7 +292,7 @@ World.listen("peerleft", function(id) Desk.needs[id] = nil end)
 ---------------------------------------------------------------- the host's desk
 
 -- Has the game make one order for `client` as if the order list had `k` orders.
-local function issue(s, client, k)
+function issue(s, client, k)
     -- (In a world that has been played for long the lists are not all of one length: some
     -- were added by a later version of the game. Each is cut and put back by its own.)
     local saved = {}
@@ -413,12 +479,13 @@ end)
 Core.every(0.25, function()
     if busy or not World.active or os.clock() > windowUntil then return end
     local s = sales()
-    if s then lastLen = count(s) end
+    if s then lastLen, lastLens = count(s), lengths(s) end
 end)
 
 local function reset()
+    storyOrders = 0
     Desk.needs, Desk.made, Desk.clients = {}, {}, 0
-    windowUntil, lastLen, firstNewest, busy = 0, nil, nil, false
+    windowUntil, lastLen, lastLens, firstNewest, busy = 0, nil, nil, nil, false
     issueAt, needSince, sentText, sentAt, skip = 0, nil, nil, 0, {}
 end
 World.listen("start", reset)

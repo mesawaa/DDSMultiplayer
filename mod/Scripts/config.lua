@@ -102,6 +102,8 @@ return {
     -- Edwin behind the club's bar (talk to him) puts on a song a player picks, for this much. false: no Edwin.
     ClubSongs = true,
     ClubSongPrice = 20,
+    -- The trash man in East Oldtown buys water bottles, spray cans and valuables. false: off.
+    JunkBuyer = true,
     -- Poker with La Ballena at his table in the club (Texas hold'em, no limit). false: off.
     Poker = true,
     -- The small and the big blind, and the sums of chips a player can buy.
